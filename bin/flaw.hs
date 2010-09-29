@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main (main) where
+module Main
+  ( main
+  , handleLogI, inumTee, stderrLog
+  ) where
 
 import           Control.Monad
 import           Control.Monad.Trans
@@ -20,6 +23,7 @@ import           Data.IterIO.Http
 import qualified Data.ListLike as LL
 
 type L = L.ByteString
+type S = S8.ByteString
 
 port :: Net.PortNumber
 port = 8001
@@ -38,59 +42,106 @@ page pageTitle contents =
              , body << contents
              ]
 
-formPage :: Html
-formPage = page t $ toHtml
+urlencoded :: S
+urlencoded = S8.pack "application/x-www-form-urlencoded"
+
+multipart :: S
+multipart = S8.pack "multipart/form-data"
+
+formPage :: Maybe S -> Html
+formPage encM = page t $ toHtml
   [ h1 << t
-  , form ! [ action "/submit" , method "POST" ] <<
-      [ textfield "data1"
-      , textfield "data2"
+  , paragraph << maybe "It will be submitted with the browser's default Content-Type."
+                       (("It will be submitted with Content-Type: " ++) . S8.unpack)
+                       encM
+  , form ! ([ action "/submit", method "POST" ]
+            ++ maybe [] ((:[]) . enctype . S8.unpack) encM) <<
+      [ textfield "data1", br
+      , textfield "data2", br
+      , afile "file1", br
+      , afile "file2", br
       , submit "what" "Go"
       ]
   ]
  where
   t = "Please complete this form"
 
-getReq :: (MonadIO m) => Inum L [HttpReq] m a
-getReq = mkInumM $ do
-  req <- lift httpreqI
-  ifeed [req]
-
-handleReq :: (MonadIO m) => Inum [HttpReq] [Html] m a
+handleReq :: (MonadIO m) => Inum L [Html] m a
 handleReq = mkInumM $ do
-  [req] <- lift $ dataI
-  case reqPathLst req of
-    [] -> ok $ echoPage req
-    (x:_) -> case x of
-              "slow" -> do liftIO $ threadDelay $ 5 * 1000 * 1000
-                           ok $ echoPage req
-              "form" -> ok formPage
-              _ -> ok $ echoPage req
+  req <- lift httpreqI
+  case reqMethod req of
+    "GET" ->
+      case reqPathLst req of
+        [] -> echo req
+        (x:_) -> case x of
+                  "slow" -> do liftIO $ threadDelay $ 5 * 1000 * 1000
+                               echo req
+                  "form" -> ok $ formPage Nothing
+                  "form-urlencoded" -> ok $ formPage (Just urlencoded)
+                  "form-multipart" -> ok $ formPage (Just multipart)
+                  _ -> echo req
+    "POST" -> echo req
+    _ -> error $ "Unrecognized method"
+ where
+  echo req = do
+    h <- lift $ request2Html req
+    ok $ page "Request" h
 
 ok :: (MonadIO m, ChunkData t) => Html -> InumM t [Html] m a ()
 ok p = ifeed [p] >> return ()
 
-echoPage :: HttpReq -> Html
-echoPage req = page "Request" $ req2Html req
-
-req2Html :: HttpReq -> Html
-req2Html r = paragraph << (query +++ headers +++ cookies +++ contents)
+request2Html :: (Monad m) => HttpReq -> Iter L m Html
+request2Html req = do
+  parms <- foldParms [] getPart
+  return (header2Html req +++ parms2Html parms)
  where
-  query = toHtml [ toHtml $ S8.unpack (reqMethod r) ++ " "
-                 , strong <<
-                     (S8.unpack (reqHost r)
-                      ++ (maybe "" (\p -> ":" ++ show p) $ reqPort r)
-                      ++ S8.unpack (reqPath r)
-                      ++ (if S8.null q
-                            then ""
-                            else "?" ++ S8.unpack q))
-                 , toHtml $ " HTTP/" ++ show major ++ "." ++ show minor
-                 ]
+  parms2Html parts = ulist << (map ((li <<) . parm2Html) parts)
+  parm2Html (mp,front,backLen) = toHtml
+    [ strong << (S8.unpack (mpName mp) ++ ": ")
+    , thespan << L.unpack front
+    , if backLen > 0
+        then emphasize << ("... (" ++ show (fromIntegral (L.length front) + backLen) ++ " bytes)")
+        else noHtml
+    ]
+  getPart parts mp = do
+    front <- takeExactI 50
+    backLen <- countI
+    return ((mp,front,backLen):parts)
+  foldParms = case reqContentType req of
+                Nothing -> foldQuery req
+                _ -> foldForm req
+
+-- showContentType (typ,_) = toHtml $ S8.unpack typ
+
+countI :: (Monad m, ChunkData t, LL.ListLike t e) =>
+          Iter t m Int
+countI = more 0
+ where
+  more n = do
+    eof <- atEOFI
+    if eof
+      then return n
+      else do buf <- dataI
+              more (n + LL.length buf)
+
+header2Html :: HttpReq -> Html
+header2Html r = toHtml [ requestLine, headers, cookies ]
+ where
+  requestLine = paragraph <<
+     [ toHtml $ S8.unpack (reqMethod r) ++ " "
+     , strong <<
+         (S8.unpack (reqHost r)
+          ++ (maybe "" (\p -> ":" ++ show p) $ reqPort r)
+          ++ S8.unpack (reqPath r)
+          ++ (if S8.null q
+                then ""
+                else "?" ++ S8.unpack q))
+     , toHtml $ " HTTP/" ++ show major ++ "." ++ show minor
+     ]
   (major,minor) = reqVers r
   q = reqQuery r
   headers = defs2Html $ reqHeaders r
   cookies = defs2Html $ reqCookies r
-  contents = maybe noHtml (toHtml . showContentType) $ reqContentType r
-  showContentType (typ,_) = toHtml $ S8.unpack typ
   def2Html (h,v) = toHtml [ strong << (S8.unpack h ++ ": ")
                           , toHtml $ S8.unpack v ]
   defs2Html dd = if null dd
@@ -124,7 +175,6 @@ inumTee = mkInumAutoM . loop
       loop iter = do
         buf <- lift dataI
         iter' <- lift $ inumPure buf iter
-        -- iter' <- lift $ inumMC passCtl $ feedI iter $ chunk buf
         _ <- ifeed buf
         loop iter'
 
@@ -177,8 +227,8 @@ handleConnection :: Net.Socket -> IO ()
 handleConnection s = do
   h <- Net.socketToHandle s IO.ReadWriteMode
   IO.hSetBuffering h IO.NoBuffering
-  enumHandle' h |. stderrLog (L.pack "< ")
-     |$ getReq .| handleReq .| html2L .| handleI h
+  enumHandle' h -- |. stderrLog "< "
+     |$ handleReq .| html2L .| handleI h
 
 warn :: String -> IO ()
 warn msg = IO.hPutStrLn IO.stderr msg
