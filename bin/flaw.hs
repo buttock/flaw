@@ -13,6 +13,7 @@ import           Data.IterIO.Http
 -- import qualified Data.ListLike as LL
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Maybe (fromMaybe)
 import qualified System.IO as IO
 import           Text.XHtml.Strict hiding (p)
 
@@ -25,7 +26,7 @@ import Server
 import Message
 
 type L = L.ByteString
-type S = S.ByteString
+-- type S = S.ByteString
 
 
 main :: IO ()
@@ -39,25 +40,24 @@ main = do
 -- Game state
 --
 
-newtype GameId = GameId S
+newtype GameId = GameId Integer
   deriving (Eq, Ord)
 
-instance Show GameId where
-  show (GameId s) = S.unpack s
-
-data Game = Game { gameId :: GameId }
+data Game = Game { gameId :: GameId
+                 , gameStart :: UTCTime
+                 }
 
 instance Show Game where
-  show g = "Game " ++ (show $ gameId g)
+  show game = show $ gameStart game
 
 data State = State { stateGames :: Map GameId Game
-                   , stateNextId :: Integer
+                   , stateNextGameId :: Integer
                    , stateKey :: Word128
                    }
 
 initState :: State
 initState = State { stateGames = Map.empty
-                  , stateNextId = 0
+                  , stateNextGameId = 0
                   , stateKey = 42
                   }
 
@@ -81,8 +81,21 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       (x:restPath) ->
         case S.unpack x of
           "games" -> gamesRequest restPath
+          "dealer" -> dealerRequest restPath
           _ -> notFound'
       _ -> notFound'
+
+  dealerRequest path =
+    case path of
+      (is:restPath) -> do
+        s <- getState
+        let ii' :: Integer = fromMaybe 0 $ Base32.decode $ S.unpack is
+            i' :: Word128 = fromIntegral ii'
+            i :: Integer = fromIntegral $ AES.decrypt (stateKey s + 1) i'
+        let gi = GameId i
+        case Map.lookup gi (stateGames s) of
+          Nothing -> notFound $ "No such game."
+          Just game -> gameRequest game restPath
 
   gamesRequest path =
     case path of
@@ -90,25 +103,28 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
               "GET" -> showGames
               "POST" -> startGame
               _ -> badRequest "Method not allowed."
-      (i:restPath) -> do
-        state <- getState
+      (is:restPath) -> do
+        s <- getState
+        let ii' :: Integer = fromMaybe 0 $ Base32.decode $ S.unpack is
+            i' :: Word128 = fromIntegral ii'
+            i :: Integer = fromIntegral $ AES.decrypt (stateKey s) i'
         let gi = GameId i
-        case Map.lookup gi (stateGames state) of
-          Nothing -> notFound $ "no such game: " ++ show gi
+        case Map.lookup gi (stateGames s) of
+          Nothing -> notFound $ "No such game."
           Just game -> gameRequest game restPath
 
   startGame = do
-    game <- io $ modifyMVar stateM $ \state ->
-      let i = stateNextId state
-          n :: Integer = fromIntegral $ AES.encrypt (stateKey state) (fromIntegral i)
-          gi = GameId $ S.pack $ Base32.encode n
-          game = Game gi
+    now <- io getCurrentTime
+    (s, game) <- io $ modifyMVar stateM $ \state ->
+      let i = stateNextGameId state
+          gi = GameId i
+          game = Game { gameId = gi, gameStart = now }
           games' = Map.insert gi game (stateGames state)
-          state' = state { stateNextId = i + 1
+          state' = state { stateNextGameId = succ i
                          , stateGames = games'
                          }
-      in return (state', game)
-    seeOther (gameUrl game) $ page "Game created" $ toHtml $ gameLink game
+      in return (state', (state', game))
+    seeOther (gameDealerUrl s game) $ page "Game created" $ toHtml $ gameDealerLink s game
 
   gameRequest g path =
     case path of
@@ -123,13 +139,31 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       _ -> notFound'
 
   showGames = do
-    state <- getState
+    s <- getState
     ok $ page "Games" $ thediv <<
       [ h2 << "Games"
-      , ulist << map ((li <<) . gameLink) (Map.elems $ stateGames state)
+      , ulist << map ((li <<) . gameLink s) (Map.elems $ stateGames s)
       , thediv << form ! [ action "/games", method "POST" ] <<
           [ submit "start" "Start Game" ]
       ]
+
+  gameLink :: State -> Game -> HotLink
+  gameLink s g = hotlink (gameUrl s g) $ toHtml $ show g
+
+  gameUrl :: State -> Game -> URL
+  gameUrl s g = "/games/" ++ Base32.encode i'
+   where
+    (GameId i) = gameId g
+    i' :: Integer = fromIntegral $ AES.encrypt (stateKey s) $ fromIntegral i
+
+  gameDealerLink :: State -> Game -> HotLink
+  gameDealerLink s g = hotlink (gameDealerUrl s g) $ toHtml $ show g
+
+  gameDealerUrl :: State -> Game -> URL
+  gameDealerUrl s g = "/dealer/" ++ Base32.encode i'
+   where
+    (GameId i) = gameId g
+    i' :: Integer = fromIntegral $ AES.encrypt (stateKey s + 1) $ fromIntegral i
 
   showGame g = ok $ thediv << [ h2 << show g ]
 
@@ -147,16 +181,6 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 
 io :: (MonadIO m) => IO a -> m a
 io x = liftIO x
-
---
--- Links
---
-
-gameUrl :: Game -> URL
-gameUrl g = "/games/" ++ show (gameId g)
-
-gameLink :: Game -> HotLink
-gameLink g = hotlink (gameUrl g) $ toHtml $ show (gameId g)
 
 --
 -- Html
