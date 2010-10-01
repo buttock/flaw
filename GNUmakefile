@@ -5,8 +5,8 @@ all: $(TARGETS)
 
 .PHONY: all always clean build dist doc browse install
 
-WALL = -Wall -Werror
-INCLUDES = -i$(HOME)/iterIO/
+WALL = -Wall
+INCLUDES = -i$(HOME)/iterIO/ -i$(HOME)/iterIO/Examples/web
 GHC = ghc $(WALL) $(INCLUDES)
 
 always:
