@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main (main) where
 
 import           Control.Concurrent
@@ -14,6 +16,11 @@ import qualified Data.Map as Map
 import qualified System.IO as IO
 import           Text.XHtml.Strict hiding (p)
 
+import           Data.LargeWord (Word128)
+import           Data.Time.Clock
+import qualified Codec.Encryption.AES as AES
+import qualified Codec.Crockford as Base32
+
 import Server
 import Message
 
@@ -23,7 +30,9 @@ type S = S.ByteString
 
 main :: IO ()
 main = do
-  stateM <- newMVar initState
+  time <- getCurrentTime
+  let state = initState { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
+  stateM <- newMVar state
   server 8000 (handleRequest stateM)
 
 --
@@ -43,11 +52,13 @@ instance Show Game where
 
 data State = State { stateGames :: Map GameId Game
                    , stateNextId :: Integer
+                   , stateKey :: Word128
                    }
 
 initState :: State
 initState = State { stateGames = Map.empty
                   , stateNextId = 0
+                  , stateKey = 42
                   }
 
 --
@@ -89,7 +100,8 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
   startGame = do
     game <- io $ modifyMVar stateM $ \state ->
       let i = stateNextId state
-          gi = GameId $ S.pack $ show i
+          n :: Integer = fromIntegral $ AES.encrypt (stateKey state) (fromIntegral i)
+          gi = GameId $ S.pack $ Base32.encode n
           game = Game gi
           games' = Map.insert gi game (stateGames state)
           state' = state { stateNextId = i + 1
