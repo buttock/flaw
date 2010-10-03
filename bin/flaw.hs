@@ -9,7 +9,6 @@ import qualified Data.ByteString.Lazy.Char8 as L
 import           Data.IterIO
 import           Data.IterIO.Http
 -- import           Data.IterIO.Zlib
--- import           Data.List (intersperse)
 -- import qualified Data.ListLike as LL
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -43,12 +42,36 @@ main = do
 newtype GameId = GameId Integer
   deriving (Eq, Ord)
 
+data Event = Event
+
 data Game = Game { gameId :: GameId
                  , gameStart :: UTCTime
+                 , gameEvents :: [Event]
+                 , gameNEvents :: Int
+                 , gameEventsReady :: QSem
                  }
+
+defaultGame :: Game
+defaultGame = Game { gameId = error "uninitialized gameId"
+                   , gameStart = error "uninitialized gameStart"
+                   , gameEvents = []
+                   , gameNEvents = 0
+                   , gameEventsReady = error "uninitialized gameEventsReady"
+                   }
 
 instance Show Game where
   show game = show $ gameStart game
+
+gameEventsFrom :: Int -> Game -> [Event]
+gameEventsFrom n' g = more (gameNEvents g) (gameEvents g) []
+ where
+  more n ee ee' = if n > n'
+                    then more (n-1) (tail ee) (head ee : ee')
+                    else ee'
+
+--
+-- System state
+--
 
 data State = State { stateGames :: Map GameId Game
                    , stateNextGameId :: Integer
@@ -96,6 +119,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
         case Map.lookup gi (stateGames s) of
           Nothing -> notFound $ "No such game."
           Just game -> gameRequest game restPath
+      _ -> notFound'
 
   gamesRequest path =
     case path of
@@ -115,10 +139,11 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 
   startGame = do
     now <- io getCurrentTime
+    q <- io $ newQSem 0
     (s, game) <- io $ modifyMVar stateM $ \state ->
       let i = stateNextGameId state
           gi = GameId i
-          game = Game { gameId = gi, gameStart = now }
+          game = defaultGame { gameId = gi, gameStart = now, gameEventsReady = q }
           games' = Map.insert gi game (stateGames state)
           state' = state { stateNextGameId = succ i
                          , stateGames = games'
@@ -129,14 +154,14 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
   gameRequest g path =
     case path of
       [] -> showGame g
-      {-
-      [x] | x == "events" -> 
-        case S.unpack $ reqMethod req of
-          "GET" -> getEvents
-          "POST" -> postEvents
-          _ -> error "Bad request"
-      -}
-      _ -> notFound'
+      (x:restPath) ->
+        case S.unpack x of
+          "events" -> 
+            case S.unpack $ reqMethod req of
+              "GET" -> getEvents g restPath
+              -- "POST" -> postEvents g
+              _ -> badRequest "Inappropriate method"
+          _ -> notFound'
 
   showGames = do
     s <- getState
@@ -146,6 +171,29 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       , thediv << form ! [ action "/games", method "POST" ] <<
           [ submit "start" "Start Game" ]
       ]
+
+  getEvents g path =
+    case path of
+      [fromS] -> getEventsFrom g $ read $ S.unpack fromS
+      _ -> notFound'
+
+  getEventsFrom g n =
+    let events = gameEventsFrom n g
+    in if null events
+      then do
+        io $ waitQSem (gameEventsReady g)
+        getEventsFrom' g n  
+      else
+        sendEvents events
+
+  getEventsFrom' g n = do
+    let gi = gameId g
+    s <- getState
+    case Map.lookup gi (stateGames s) of
+      Nothing -> badRequest "Game no longer available."
+      Just g' -> getEventsFrom g' n
+
+  sendEvents = error "Unimplemented"
 
   gameLink :: State -> Game -> HotLink
   gameLink s g = hotlink (gameUrl s g) $ toHtml $ show g
