@@ -42,7 +42,10 @@ main = do
 newtype GameId = GameId Integer
   deriving (Eq, Ord)
 
-data Event = Event
+data Event = Event { eventTime :: UTCTime }
+
+instance Show Event where
+  show event = show $ eventTime event
 
 data Game = Game { gameId :: GameId
                  , gameStart :: UTCTime
@@ -159,7 +162,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
           "events" -> 
             case S.unpack $ reqMethod req of
               "GET" -> getEvents g restPath
-              -- "POST" -> postEvents g
+              "POST" -> postEvents g
               _ -> badRequest "Inappropriate method"
           _ -> notFound'
 
@@ -193,7 +196,27 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       Nothing -> badRequest "Game no longer available."
       Just g' -> getEventsFrom g' n
 
-  sendEvents = error "Unimplemented"
+  postEvents g = do
+    let gi = gameId g
+    gameM <- io $ modifyMVar stateM $ \s ->
+      case Map.lookup gi (stateGames s) of
+        Nothing -> return (s, Nothing)
+        Just g' -> do
+          now <- getCurrentTime
+          let e = Event now
+              g'' = g' { gameEvents = e : gameEvents g'
+                       , gameNEvents = succ $ gameNEvents g'
+                       }
+              s' = s { stateGames = Map.insert gi g'' $ stateGames s }
+          return $ (s', Just g'')
+    case gameM of
+      Nothing -> badRequest "Game no longer available."
+      Just game -> do
+        io $ signalQSem (gameEventsReady game)
+        ok "OK"
+
+  sendEvents events =
+    ok $ page "Events" $ thehtml << ulist << map ((li <<) . show) events
 
   gameLink :: State -> Game -> HotLink
   gameLink s g = hotlink (gameUrl s g) $ toHtml $ show g
@@ -219,6 +242,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
   
   xhtmlResponseI status headers x = respondI $ xhtmlResponse status headers (toHtml x)
 
+  ok :: (HTML h, MonadIO m) => h -> Iter L m ()
   ok = xhtmlResponseI statusOK []
   seeOther url = xhtmlResponseI statusSeeOther ["Location: " ++ url]
   notFound = xhtmlResponseI statusNotFound []
@@ -230,6 +254,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 io :: (MonadIO m) => IO a -> m a
 io x = liftIO x
 
+
 --
 -- Html
 --
@@ -239,3 +264,4 @@ page pageTitle contents =
   thehtml << [ header << thetitle << pageTitle
              , body << contents
              ]
+
