@@ -2,6 +2,13 @@
 var gameUrl;
 var gameHome;
 
+function onloadHandler () {}
+
+function configGame(url, homeId) {
+    var home = window.getElementById(homeId);
+    onloadHandler = function () { joinGame(url, home); }
+}
+
 function joinGame(url, home) {
     gameUrl = url;
     gameHome = home;

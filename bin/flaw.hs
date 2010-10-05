@@ -121,7 +121,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
         let gi = GameId i
         case Map.lookup gi (stateGames s) of
           Nothing -> notFound $ "No such game."
-          Just game -> gameRequest game restPath
+          Just game -> gameRequest game restPath True
       _ -> notFound'
 
   gamesRequest path =
@@ -138,7 +138,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
         let gi = GameId i
         case Map.lookup gi (stateGames s) of
           Nothing -> notFound $ "No such game."
-          Just game -> gameRequest game restPath
+          Just game -> gameRequest game restPath False
 
   startGame = do
     now <- io getCurrentTime
@@ -154,9 +154,9 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       in return (state', (state', game))
     seeOther (gameDealerUrl s game) $ page "Game created" $ toHtml $ gameDealerLink s game
 
-  gameRequest g path =
+  gameRequest g path isDealer =
     case path of
-      [] -> showGame g
+      [] -> showGame g isDealer
       (x:restPath) ->
         case S.unpack x of
           "events" -> 
@@ -165,6 +165,11 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
               "POST" -> postEvents g
               _ -> badRequest "Inappropriate method"
           _ -> notFound'
+
+  showGame g isDealer = do
+    s <- getState
+    let url = (if isDealer then gameDealerUrl else gameUrl) s g
+    ok $ gamePage g url
 
   showGames = do
     s <- getState
@@ -236,8 +241,6 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
     (GameId i) = gameId g
     i' :: Integer = fromIntegral $ AES.encrypt (stateKey s + 1) $ fromIntegral i
 
-  showGame g = ok $ thediv << [ h2 << show g ]
-
   respondI response = inumPure response .| handleI h
   
   xhtmlResponseI status headers x = respondI $ xhtmlResponse status headers (toHtml x)
@@ -259,9 +262,32 @@ io x = liftIO x
 -- Html
 --
 
+gamePage :: Game -> URL -> Html
+gamePage g url =
+  thehtml <<
+     [ header <<
+         [ meta ! [ httpequiv "Content-Type"
+                  , content "text/html; charset=UTF-8"
+                  ]
+         , thetitle << show g
+         , jsLib $ pubPath "flaw.js"
+         , js $ "configGame(\"" ++ url ++ "\", \"game\");\n"
+         ]
+     , body ! [ strAttr "onload" "onloadHandler" ] <<
+         [ h1 << show g
+         , thediv ! [ identifier "game" ] << "Hello."
+         ]
+     ]
+
 page :: String -> Html -> Html
 page pageTitle contents =
   thehtml << [ header << thetitle << pageTitle
              , body << contents
              ]
+
+cssLib path = itag "link" ! [href path, rel "stylesheet", thetype "text/css"]
+jsLib path = tag "script" noHtml ! [thetype "text/javascript", src path]
+js code = tag "script" (primHtml code) ! [thetype "text/javascript"]
+
+pubPath s = "/pub/" ++ s
 
