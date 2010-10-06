@@ -1,37 +1,47 @@
 
 var gameUrl;
+var gameHomeId;
 var gameHome;
 
 function onloadHandler () {}
 
-function configGame(url, homeId) {
-    var home = window.getElementById(homeId);
-    onloadHandler = function () { joinGame(url, home); }
-}
-
-function joinGame(url, home) {
-    gameUrl = url;
-    gameHome = home;
-
+function joinGame() {
+    console.log("joinGame");
+    gameHome = document.getElementById(gameHomeId);
     listenEvents();
 }
 
+function configGame(url, homeId) {
+    console.log("configGame");
+    gameUrl = url;
+    gameHomeId = homeId;
+    onloadHandler = joinGame;
+}
+
 var events = [];
+
+function processEvents(eventsText, nEvents) {
+    var event = "" + nEvents;
+    events.push(event);
+    gameHome.appendChild(text(event));
+    gameHome.appendChild(text(" "));
+}
 
 function nextEventsUrl(nEvents) {
     return gameUrl + "/events/" + nEvents;
 }
 
 function listenEvents() {
-    var nEvents = events.lenth;
+    console.log("listenEvents");
+    var nEvents = events.length;
     http({ method: "GET"
          , url: nextEventsUrl(nEvents)
-         , success: function (eventText) {
-                        events.push("" + nEvents);
+         , success: function (eventsText) {
+                        processEvents(eventsText, nEvents);
                         listenEvents();
                     }
          , failure: function (status) {
-                        alert("Couldn't retrieve game events.");
+                        alert("Couldn't retrieve game events (status " + status + ").");
                     }
          });
 }
@@ -56,4 +66,10 @@ function http(o) {
 function makeXHR() {
     return new window.XMLHttpRequest();
 }
+
+/*
+ *  DOM
+ */
+
+function text(s) { return document.createTextNode(s); }
 

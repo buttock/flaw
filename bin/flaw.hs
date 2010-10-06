@@ -10,9 +10,11 @@ import           Data.IterIO
 import           Data.IterIO.Http
 -- import           Data.IterIO.Zlib
 -- import qualified Data.ListLike as LL
+import           Data.List (find)
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (isJust, fromMaybe)
+import           System.FilePath.Posix (joinPath, normalise, isRelative)
 import qualified System.IO as IO
 import           Text.XHtml.Strict hiding (p)
 
@@ -108,8 +110,25 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
         case S.unpack x of
           "games" -> gamesRequest restPath
           "dealer" -> dealerRequest restPath
+          "pub" -> pubRequest restPath
           _ -> notFound'
       _ -> notFound'
+
+  pubRequest path =
+    case S.unpack $ reqMethod req of 
+      "GET" ->
+        -- XX: an exception here should produce "500 Internal Server Error",
+        -- or "404 Not Found" if the file does not exist
+        case safeFilePath ("pub" : map S.unpack path) of
+          Nothing -> badRequest "Bad file path"
+          Just filePath ->
+            let contentType = "text/javascript"
+                headers = [ "Content-Type: " ++ contentType ]
+            in do
+              warn $ "GET " ++ filePath
+              runI . enumHttpResponse statusOK headers (enumFile' filePath)
+                .| handleI h
+      _ -> badRequest "Method not allowed."
 
   dealerRequest path =
     case path of
@@ -254,6 +273,8 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 
   getState = io $ readMVar stateM
 
+  warn s = io $ IO.hPutStrLn IO.stderr s
+
 io :: (MonadIO m) => IO a -> m a
 io x = liftIO x
 
@@ -273,7 +294,7 @@ gamePage g url =
          , jsLib $ pubPath "flaw.js"
          , js $ "configGame(\"" ++ url ++ "\", \"game\");\n"
          ]
-     , body ! [ strAttr "onload" "onloadHandler" ] <<
+     , body ! [ strAttr "onload" "onloadHandler();" ] <<
          [ h1 << show g
          , thediv ! [ identifier "game" ] << "Hello."
          ]
@@ -290,4 +311,17 @@ jsLib path = tag "script" noHtml ! [thetype "text/javascript", src path]
 js code = tag "script" (primHtml code) ! [thetype "text/javascript"]
 
 pubPath s = "/pub/" ++ s
+
+--
+-- Utils
+--
+
+safeFilePath :: [String] -> Maybe FilePath
+safeFilePath pp =
+  if isJust $ find ((== '.') . head) $ filter (not . null) pp
+  then Nothing
+  else let fp = normalise $ joinPath pp
+       in if isRelative fp
+          then Just fp
+          else Nothing
 
