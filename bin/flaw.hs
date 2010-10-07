@@ -2,33 +2,30 @@
 
 module Main (main) where
 
+import qualified Codec.Encryption.AES as AES
+import qualified Codec.Crockford as Base32
 import           Control.Concurrent
 import           Control.Monad.Trans
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
 import           Data.IterIO
 import           Data.IterIO.Http
--- import           Data.IterIO.Zlib
--- import qualified Data.ListLike as LL
+import           Data.LargeWord (Word128)
 import           Data.List (find)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Time.Clock
 import           Data.Maybe (isJust, fromMaybe)
 import           System.FilePath.Posix (joinPath, normalise, isRelative)
 import qualified System.IO as IO
+import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
-
-import           Data.LargeWord (Word128)
-import           Data.Time.Clock
-import qualified Codec.Encryption.AES as AES
-import qualified Codec.Crockford as Base32
 
 import Server
 import Message
 
 type L = L.ByteString
--- type S = S.ByteString
-
+type S = S.ByteString
 
 main :: IO ()
 main = do
@@ -48,6 +45,9 @@ data Event = Event { eventTime :: UTCTime }
 
 instance Show Event where
   show event = show $ eventTime event
+
+instance JSON Event where
+  showJSON e = showJSON (show e)
 
 data Game = Game { gameId :: GameId
                  , gameStart :: UTCTime
@@ -121,14 +121,10 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
         -- or "404 Not Found" if the file does not exist
         case safeFilePath ("pub" : map S.unpack path) of
           Nothing -> badRequest "Bad file path"
-          Just filePath ->
-            let contentType = "text/javascript"
-                headers = [ "Content-Type: " ++ contentType ]
-            in do
-              warn $ "GET " ++ filePath
-              runI . enumHttpResponse statusOK headers (enumFile' filePath)
-                .| handleI h
-      _ -> badRequest "Method not allowed."
+          Just filePath -> do
+            warn $ "GET " ++ filePath
+            ok $ FileMsg mimetype'javascript filePath
+      _ -> badRequest "Method not allowed"
 
   dealerRequest path =
     case path of
@@ -139,7 +135,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
             i :: Integer = fromIntegral $ AES.decrypt (stateKey s + 1) i'
         let gi = GameId i
         case Map.lookup gi (stateGames s) of
-          Nothing -> notFound $ "No such game."
+          Nothing -> notFound "No such game"
           Just game -> gameRequest game restPath True
       _ -> notFound'
 
@@ -156,7 +152,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
             i :: Integer = fromIntegral $ AES.decrypt (stateKey s) i'
         let gi = GameId i
         case Map.lookup gi (stateGames s) of
-          Nothing -> notFound $ "No such game."
+          Nothing -> notFound "No such game"
           Just game -> gameRequest game restPath False
 
   startGame = do
@@ -217,7 +213,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
     let gi = gameId g
     s <- getState
     case Map.lookup gi (stateGames s) of
-      Nothing -> badRequest "Game no longer available."
+      Nothing -> badRequest "Game no longer available"
       Just g' -> getEventsFrom g' n
 
   postEvents g = do
@@ -234,13 +230,13 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
               s' = s { stateGames = Map.insert gi g'' $ stateGames s }
           return $ (s', Just g'')
     case gameM of
-      Nothing -> badRequest "Game no longer available."
+      Nothing -> badRequest "Game no longer available"
       Just game -> do
         io $ signalQSem (gameEventsReady game)
         ok "OK"
 
   sendEvents events =
-    ok $ page "Events" $ thehtml << ulist << map ((li <<) . show) events
+    ok $ JSONMessage $ showJSON events
 
   gameLink :: State -> Game -> HotLink
   gameLink s g = hotlink (gameUrl s g) $ toHtml $ show g
@@ -260,16 +256,23 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
     (GameId i) = gameId g
     i' :: Integer = fromIntegral $ AES.encrypt (stateKey s + 1) $ fromIntegral i
 
-  respondI response = inumPure response .| handleI h
+  messageI :: (Message msg, MonadIO m) => S -> [S] -> msg -> Iter L m ()
+  messageI status headers msg =
+    inumMsg status headers msg .| handleI h
   
-  xhtmlResponseI status headers x = respondI $ xhtmlResponse status headers (toHtml x)
+  ok :: (Message msg, MonadIO m) => msg -> Iter L m ()
+  ok msg = messageI statusOK [] msg
 
-  ok :: (HTML h, MonadIO m) => h -> Iter L m ()
-  ok = xhtmlResponseI statusOK []
-  seeOther url = xhtmlResponseI statusSeeOther ["Location: " ++ url]
-  notFound = xhtmlResponseI statusNotFound []
-  notFound' = notFound "Not Found."
-  badRequest = xhtmlResponseI statusBadRequest []
+  seeOther :: (Message msg, MonadIO m) => URL -> msg -> Iter L m ()
+  seeOther url = messageI statusSeeOther [S.pack $ "Location: " ++ url]
+
+  notFound :: (Message msg, MonadIO m) => msg -> Iter L m ()
+  notFound = messageI statusNotFound []
+
+  notFound' = notFound "Not Found"
+
+  badRequest :: (Message msg, MonadIO m) => msg -> Iter L m ()
+  badRequest = messageI statusBadRequest []
 
   getState = io $ readMVar stateM
 
@@ -277,6 +280,17 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 
 io :: (MonadIO m) => IO a -> m a
 io x = liftIO x
+
+
+--
+-- JSON
+--
+
+data JSONMessage = JSONMessage JSValue
+
+instance Message JSONMessage where
+  msgContentType _ = mimetype'json
+  msgBytes (JSONMessage json) = U.fromString $ show json
 
 
 --
