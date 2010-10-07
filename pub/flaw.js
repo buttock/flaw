@@ -21,10 +21,11 @@ function configGame(url, homeId) {
 var events = [];
 
 function processEvents(eventsText, nEvents) {
-    var event = "" + nEvents;
-    events.push(event);
-    gameHome.appendChild(text(event));
-    gameHome.appendChild(text(" "));
+    var ee = eval('(' + eventsText + ')');
+    each(ee, function (e) {
+        events.push(e);
+        gameHome.appendChild(text(e));
+    });
 }
 
 function nextEventsUrl(nEvents) {
@@ -72,4 +73,15 @@ function makeXHR() {
  */
 
 function text(s) { return document.createTextNode(s); }
+
+/*
+ * util
+ */
+
+function each(a,f) {
+    var i, iLim;
+    for (iLim=a.length, i=0; i<iLim; i++) {
+        f(a[i]);
+    }
+}
 
