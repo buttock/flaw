@@ -1,84 +1,86 @@
 
-var gameUrl;
-var gameHomeId;
-var gameHome;
-var gameEvents;
-var postButton;
-
 function onloadHandler () {}
 
-function joinGame() {
-    console.log("joinGame");
-    gameHome = eltById(gameHomeId);
+function configGame(cfg) {
+    console.log("configGame");
+    onloadHandler = startGame(cfg);
+}
 
-    postButton = input({ type: "submit"
-                       , id: "postButton"
-                       , name: "post"
-                       , value: "Post Event"});
+function startGame(cfg) { return function () {
+    console.log("startGame");
+
+    /*
+     * User Interface
+     */
+
+    var gameHome = eltById(cfg.gameHomeId);
+
+    var postButton = input({ type: "submit"
+                           , id: "postButton"
+                           , name: "post"
+                           , value: "Post Event"});
 
     var postForm = form({ method: "POST" }, postButton);
     postForm.addEventListener("submit", postEvent, true);
 
     gameHome.appendChild(div({}, postForm));
 
-    gameEvents = div({});
+    var gameEvents = div({});
     gameHome.appendChild(gameEvents);
 
+    /*
+     *  Game Events
+     */
+
+    var events = [];
+
+    function processEvents(eventsText, nEvents) {
+        var ee = readJSON(eventsText);
+        each(ee, function (e) {
+            events.push(e);
+            prepend(gameEvents, div({}, text(e)));
+        });
+    }
+
+    function nextEventsUrl(nEvents) {
+        return eventsUrl() + "/" + nEvents;
+    }
+
+    function eventsUrl() {
+        return cfg.url + "/events";
+    }
+
+    function listenEvents() {
+        console.log("listenEvents");
+        var nEvents = events.length;
+        http({ method: "GET"
+             , url: nextEventsUrl(nEvents)
+             , success: function (eventsText) {
+                            processEvents(eventsText, nEvents);
+                            listenEvents();
+                        }
+             , failure: function (status) {
+                            console.warn("Couldn't retrieve game events (status " + status + ").");
+                        }
+             });
+    }
+
+    function postEvent(e) {
+        console.log("postEvent");
+        e.preventDefault();
+        e.stopPropagation();
+        disable(postButton);
+        http({ method: "POST"
+             , url: eventsUrl()
+             , success: function () { enable(postButton); }
+             , failure: function () { enable(postButton); }
+             });
+        return false;
+    }
+
     listenEvents();
-}
+}; }
 
-function configGame(url, homeId) {
-    console.log("configGame");
-    gameUrl = url;
-    gameHomeId = homeId;
-    onloadHandler = joinGame;
-}
-
-var events = [];
-
-function processEvents(eventsText, nEvents) {
-    var ee = eval('(' + eventsText + ')');
-    each(ee, function (e) {
-        events.push(e);
-        prepend(gameEvents, div({}, text(e)));
-    });
-}
-
-function nextEventsUrl(nEvents) {
-    return eventsUrl() + "/" + nEvents;
-}
-
-function eventsUrl() {
-    return gameUrl + "/events";
-}
-
-function listenEvents() {
-    console.log("listenEvents");
-    var nEvents = events.length;
-    http({ method: "GET"
-         , url: nextEventsUrl(nEvents)
-         , success: function (eventsText) {
-                        processEvents(eventsText, nEvents);
-                        listenEvents();
-                    }
-         , failure: function (status) {
-                        console.warn("Couldn't retrieve game events (status " + status + ").");
-                    }
-         });
-}
-
-function postEvent(e) {
-    console.log("postEvent");
-    e.preventDefault();
-    e.stopPropagation();
-    disable(postButton);
-    http({ method: "POST"
-         , url: eventsUrl()
-         , success: function () { enable(postButton); }
-         , failure: function () { enable(postButton); }
-         });
-    return false;
-}
 
 /*
  * Ajax
@@ -106,6 +108,10 @@ function makeXHR() {
 }
 
 function later(k) { window.setTimeout(k, 0); }
+
+function readJSON (s) {
+    return eval('(' + s + ')');
+}
 
 /*
  * DOM

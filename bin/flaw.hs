@@ -28,6 +28,9 @@ import Message
 type L = L.ByteString
 type S = S.ByteString
 
+encodeJSValue :: JSValue -> String
+encodeJSValue = encode
+
 main :: IO ()
 main = do
   time <- getCurrentTime
@@ -186,7 +189,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
   showGame g isDealer = do
     s <- getState
     let url = (if isDealer then gameDealerUrl else gameUrl) s g
-    ok $ gamePage g url
+    ok $ gamePage g url isDealer
 
   showGames = do
     s <- getState
@@ -220,6 +223,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       Just g' -> getEventsFrom g' n
 
   postEvents g = do
+    -- io $ threadDelay $ 2 * 1000 * 1000
     let gi = gameId g
     gameM <- io $ modifyMVar stateM $ \s ->
       case Map.lookup gi (stateGames s) of
@@ -293,30 +297,32 @@ data JSONMessage = JSONMessage JSValue
 
 instance Message JSONMessage where
   msgContentType _ = mimetype'json
-  msgBytes (JSONMessage json) = U.fromString $ encode json
+  msgBytes (JSONMessage json) = U.fromString $ encodeJSValue json
 
 
 --
 -- Html
 --
 
-gamePage :: Game -> URL -> Html
-gamePage g url =
+gamePage :: Game -> URL -> Bool -> Html
+gamePage g url isDealer =
   thehtml <<
      [ header <<
          [ meta ! [ httpequiv "Content-Type"
                   , content "text/html; charset=UTF-8"
                   ]
-         , thetitle << show g
+         , thetitle << (show g ++ if isDealer then " (Dealer)" else "")
          , jsLib $ pubPath "flaw.js"
-         , js $ "configGame(\"" ++ url ++ "\", \"game\");\n"
+         , js $ "configGame("
+                ++ (encodeJSValue $ makeObj
+                      [("url", showJSON url)
+                      ,("gameHomeId", showJSON "game")
+                      ,("isDealer", showJSON isDealer)
+                      ])
+                ++ ");"
          ]
      , body ! [ onload "onloadHandler();" ] <<
          [ h1 << show g
-         {-
-         , thediv << form ! [ method "POST" , onsubmit "return postEvent()" ] <<
-             [ submit "post" "Post Event" ! [ identifier "postButton" ]]
-         -}
          , thediv ! [ identifier "game" ] << "Hello."
          ]
      ]
@@ -341,8 +347,8 @@ pubPath = combine "/pub/"
 onload :: String -> HtmlAttr
 onload = strAttr "onload"
 
-onsubmit :: String -> HtmlAttr
-onsubmit = strAttr "onsubmit"
+-- onsubmit :: String -> HtmlAttr
+-- onsubmit = strAttr "onsubmit"
 
 --
 -- Utils
