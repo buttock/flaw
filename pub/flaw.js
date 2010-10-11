@@ -2,12 +2,28 @@
 var gameUrl;
 var gameHomeId;
 var gameHome;
+var gameEvents;
+var postButton;
 
 function onloadHandler () {}
 
 function joinGame() {
     console.log("joinGame");
-    gameHome = document.getElementById(gameHomeId);
+    gameHome = eltById(gameHomeId);
+
+    postButton = input({ type: "submit"
+                       , id: "postButton"
+                       , name: "post"
+                       , value: "Post Event"});
+
+    var postForm = form({ method: "POST" }, postButton);
+    postForm.addEventListener("submit", postEvent, true);
+
+    gameHome.appendChild(div({}, postForm));
+
+    gameEvents = div({});
+    gameHome.appendChild(gameEvents);
+
     listenEvents();
 }
 
@@ -24,12 +40,16 @@ function processEvents(eventsText, nEvents) {
     var ee = eval('(' + eventsText + ')');
     each(ee, function (e) {
         events.push(e);
-        gameHome.appendChild(div({}, text(e)));
+        prepend(gameEvents, div({}, text(e)));
     });
 }
 
 function nextEventsUrl(nEvents) {
-    return gameUrl + "/events/" + nEvents;
+    return eventsUrl() + "/" + nEvents;
+}
+
+function eventsUrl() {
+    return gameUrl + "/events";
 }
 
 function listenEvents() {
@@ -42,12 +62,29 @@ function listenEvents() {
                         listenEvents();
                     }
          , failure: function (status) {
-                        alert("Couldn't retrieve game events (status " + status + ").");
+                        console.warn("Couldn't retrieve game events (status " + status + ").");
                     }
          });
 }
 
-function http(o) {
+function postEvent(e) {
+    console.log("postEvent");
+    e.preventDefault();
+    e.stopPropagation();
+    disable(postButton);
+    http({ method: "POST"
+         , url: eventsUrl()
+         , success: function () { enable(postButton); }
+         , failure: function () { enable(postButton); }
+         });
+    return false;
+}
+
+/*
+ * Ajax
+ */
+
+function http(o) { later (function() {
     var xhr = makeXHR();
     xhr.onreadystatechange = function () {
         if (this.readyState == 4) {
@@ -62,15 +99,23 @@ function http(o) {
     };
     xhr.open(o.method, o.url);
     xhr.send();
-}
+}); }
 
 function makeXHR() {
     return new window.XMLHttpRequest();
 }
 
+function later(k) { window.setTimeout(k, 0); }
+
 /*
- *  DOM
+ * DOM
  */
+
+function eltById(id) { return document.getElementById(id); }
+
+function disable(elt) { elt.setAttribute("disabled", "disabled"); }
+
+function enable(elt) { elt.removeAttribute("disabled"); }
 
 function text(s) { return document.createTextNode(s); }
 
@@ -93,17 +138,18 @@ function eltMaker(name) { return function () {
 }; }
 
 var div = eltMaker("div");
+var form = eltMaker("form");
+var input = eltMaker("input");
 
-/*
-function ins () {
-    var container = arguments[0];
-    var i, iLim;
-    for (i=0, iLim=arguments.length; i<iLim; i++) {
-        container.appendChild(arguments[i]);
+function prepend(container, elt) {
+    var children = container.childNodes;
+    if (children.length > 0) {
+        container.insertBefore(elt, children[0]);
     }
-    return container;
+    else {
+        container.appendChild(elt);
+    }
 }
-*/
 
 /*
  * util

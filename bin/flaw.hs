@@ -207,7 +207,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
     in if null events
       then do
         ready <- io $ dupChan (gameEventsReady g)
-        _ <- readChan ready
+        _ <- io $ readChan ready
         getEventsFrom' g n  
       else
         sendEvents events
@@ -311,8 +311,12 @@ gamePage g url =
          , jsLib $ pubPath "flaw.js"
          , js $ "configGame(\"" ++ url ++ "\", \"game\");\n"
          ]
-     , body ! [ strAttr "onload" "onloadHandler();" ] <<
+     , body ! [ onload "onloadHandler();" ] <<
          [ h1 << show g
+         {-
+         , thediv << form ! [ method "POST" , onsubmit "return postEvent()" ] <<
+             [ submit "post" "Post Event" ! [ identifier "postButton" ]]
+         -}
          , thediv ! [ identifier "game" ] << "Hello."
          ]
      ]
@@ -333,6 +337,12 @@ js code = tag "script" (primHtml code) ! [thetype "text/javascript"]
 
 pubPath :: FilePath -> FilePath
 pubPath = combine "/pub/"
+
+onload :: String -> HtmlAttr
+onload = strAttr "onload"
+
+onsubmit :: String -> HtmlAttr
+onsubmit = strAttr "onsubmit"
 
 --
 -- Utils
