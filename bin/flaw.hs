@@ -53,7 +53,7 @@ data Game = Game { gameId :: GameId
                  , gameStart :: UTCTime
                  , gameEvents :: [Event]
                  , gameNEvents :: Int
-                 , gameEventsReady :: QSem
+                 , gameEventsReady :: Chan ()
                  }
 
 defaultGame :: Game
@@ -157,11 +157,11 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 
   startGame = do
     now <- io getCurrentTime
-    q <- io $ newQSem 0
+    ch <- io $ newChan
     (s, game) <- io $ modifyMVar stateM $ \state ->
       let i = stateNextGameId state
           gi = GameId i
-          game = defaultGame { gameId = gi, gameStart = now, gameEventsReady = q }
+          game = defaultGame { gameId = gi, gameStart = now, gameEventsReady = ch }
           games' = Map.insert gi game (stateGames state)
           state' = state { stateNextGameId = succ i
                          , stateGames = games'
@@ -204,7 +204,8 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
     let events = gameEventsFrom n g
     in if null events
       then do
-        io $ waitQSem (gameEventsReady g)
+        ready <- io $ dupChan (gameEventsReady g)
+        _ <- readChan ready
         getEventsFrom' g n  
       else
         sendEvents events
@@ -232,7 +233,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
     case gameM of
       Nothing -> badRequest "Game no longer available"
       Just game -> do
-        io $ signalQSem (gameEventsReady game)
+        io $ writeChan (gameEventsReady game) ()
         ok "OK"
 
   sendEvents events =
