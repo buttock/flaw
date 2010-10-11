@@ -8,6 +8,7 @@ import           Control.Concurrent
 import           Control.Monad.Trans
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
+import qualified Data.ByteString.Lazy.UTF8 as U
 import           Data.IterIO
 import           Data.IterIO.Http
 import           Data.LargeWord (Word128)
@@ -16,7 +17,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Time.Clock
 import           Data.Maybe (isJust, fromMaybe)
-import           System.FilePath.Posix (joinPath, normalise, isRelative)
+import           System.FilePath.Posix (joinPath, combine, normalise, isRelative)
 import qualified System.IO as IO
 import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
@@ -48,6 +49,7 @@ instance Show Event where
 
 instance JSON Event where
   showJSON e = showJSON (show e)
+  readJSON _ = error "unimplemented"
 
 data Game = Game { gameId :: GameId
                  , gameStart :: UTCTime
@@ -291,7 +293,7 @@ data JSONMessage = JSONMessage JSValue
 
 instance Message JSONMessage where
   msgContentType _ = mimetype'json
-  msgBytes (JSONMessage json) = U.fromString $ show json
+  msgBytes (JSONMessage json) = U.fromString $ encode json
 
 
 --
@@ -321,11 +323,16 @@ page pageTitle contents =
              , body << contents
              ]
 
-cssLib path = itag "link" ! [href path, rel "stylesheet", thetype "text/css"]
+jsLib :: FilePath -> Html
 jsLib path = tag "script" noHtml ! [thetype "text/javascript", src path]
+
+js :: String -> Html
 js code = tag "script" (primHtml code) ! [thetype "text/javascript"]
 
-pubPath s = "/pub/" ++ s
+-- cssLib path = itag "link" ! [href path, rel "stylesheet", thetype "text/css"]
+
+pubPath :: FilePath -> FilePath
+pubPath = combine "/pub/"
 
 --
 -- Utils

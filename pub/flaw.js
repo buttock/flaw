@@ -21,10 +21,11 @@ function configGame(url, homeId) {
 var events = [];
 
 function processEvents(eventsText, nEvents) {
-    var event = "" + nEvents;
-    events.push(event);
-    gameHome.appendChild(text(event));
-    gameHome.appendChild(text(" "));
+    var ee = eval('(' + eventsText + ')');
+    each(ee, function (e) {
+        events.push(e);
+        gameHome.appendChild(div({}, text(e)));
+    });
 }
 
 function nextEventsUrl(nEvents) {
@@ -72,4 +73,46 @@ function makeXHR() {
  */
 
 function text(s) { return document.createTextNode(s); }
+
+function element(name, attrs) {
+    var elt = document.createElement(name);
+    for (attrName in attrs) {
+        elt.setAttribute(attrName, attrs[attrName]);
+    }
+    return elt;
+}
+
+function eltMaker(name) { return function () {
+    var attrs = arguments[0];
+    var elt = element(name, attrs);
+    var i, iLim;
+    for (i=1, iLim=arguments.length; i<iLim; i++) {
+        elt.appendChild(arguments[i]);
+    }
+    return elt;
+}; }
+
+var div = eltMaker("div");
+
+/*
+function ins () {
+    var container = arguments[0];
+    var i, iLim;
+    for (i=0, iLim=arguments.length; i<iLim; i++) {
+        container.appendChild(arguments[i]);
+    }
+    return container;
+}
+*/
+
+/*
+ * util
+ */
+
+function each(a,f) {
+    var i, iLim;
+    for (iLim=a.length, i=0; i<iLim; i++) {
+        f(a[i]);
+    }
+}
 
