@@ -15,14 +15,7 @@ function startGame(cfg) { return function () {
 
     var gameHome = eltById(cfg.gameHomeId);
 
-    var postButton = input({ type: "submit"
-                           , id: "postButton"
-                           , name: "post"
-                           , value: "Post Event"});
-
-    var postForm = form({ method: "POST" }, postButton);
-    postForm.addEventListener("submit", postEvent, true);
-
+    postForm = actionButton("post", "Post Event", eventsUrl(), postEvent);
     gameHome.appendChild(div({}, postForm));
 
     var gameEvents = div({});
@@ -67,15 +60,6 @@ function startGame(cfg) { return function () {
 
     function postEvent(e) {
         console.log("postEvent");
-        e.preventDefault();
-        e.stopPropagation();
-        disable(postButton);
-        http({ method: "POST"
-             , url: eventsUrl()
-             , success: function () { enable(postButton); }
-             , failure: function () { enable(postButton); }
-             });
-        return false;
     }
 
     listenEvents();
@@ -112,6 +96,35 @@ function later(k) { window.setTimeout(k, 0); }
 function readJSON (s) {
     return eval('(' + s + ')');
 }
+
+function actionButton(id, name, url, handler) {
+    var submitButton = input({ type: "submit"
+                             , id: id
+                             , name: "post"
+                             , value: name });
+    var postForm = form({ method: "POST" }, submitButton);
+    function onSubmit(e) {
+        disable(submitButton);
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        http({ method: "POST"
+             , url: url
+             , success: function (resultText) {
+                            handler(resultText);
+                            enable(submitButton);
+                        }
+             , failure: function () {
+                            alert("Action failed: " + name);
+                            enable(submitButton);
+                        }
+             });
+    }
+    postForm.addEventListener("submit", onSubmit, true);
+    return postForm;
+}
+
 
 /*
  * DOM
