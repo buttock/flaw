@@ -5,12 +5,15 @@ module Main (main) where
 import qualified Codec.Encryption.AES as AES
 import qualified Codec.Crockford as Base32
 import           Control.Concurrent
+import           Control.Monad (when)
 import           Control.Monad.Trans
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Lazy.UTF8 as U
+import           Data.Char (ord)
 import           Data.IterIO
 import           Data.IterIO.Http
+import           Data.IterIO.Parse
 import           Data.LargeWord (Word128)
 import           Data.List (find)
 import           Data.Map (Map)
@@ -45,14 +48,27 @@ main = do
 newtype GameId = GameId Integer
   deriving (Eq, Ord)
 
-data Event = Event { eventTime :: UTCTime }
+data Event = Event { eventTime :: UTCTime
+                   , eventData :: EventData
+                   }
 
+{-
 instance Show Event where
-  show event = show $ eventTime event
+  show event = show $ eventData event
+-}
 
 instance JSON Event where
-  showJSON e = showJSON (show e)
-  readJSON _ = error "unimplemented"
+  showJSON e = showJSON $ eventData e
+  readJSON s = do dat <- readJSON s
+                  return $ Event { eventTime = error "no time"
+                                 , eventData = dat
+                                 }
+
+data EventData = NoteEvent String 
+
+instance JSON EventData where
+  showJSON (NoteEvent s) = showJSON s
+  readJSON s = NoteEvent <$> readJSON s
 
 data Game = Game { gameId :: GameId
                  , gameStart :: UTCTime
@@ -222,17 +238,22 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       Nothing -> badRequest "Game no longer available"
       Just g' -> getEventsFrom g' n
 
+  sendEvents events =
+    ok $ JSONMessage $ showJSON events
+
   postEvents g = do
     -- io $ threadDelay $ 2 * 1000 * 1000
+    eventsS <- netstringI
+    let events = either error id $ resultToEither $ decode $
+                   U.toString eventsS
     let gi = gameId g
     gameM <- io $ modifyMVar stateM $ \s ->
       case Map.lookup gi (stateGames s) of
         Nothing -> return (s, Nothing)
         Just g' -> do
-          now <- getCurrentTime
-          let e = Event now
-              g'' = g' { gameEvents = e : gameEvents g'
-                       , gameNEvents = succ $ gameNEvents g'
+          -- now <- getCurrentTime
+          let g'' = g' { gameEvents = events ++ gameEvents g'
+                       , gameNEvents = length events + gameNEvents g'
                        }
               s' = s { stateGames = Map.insert gi g'' $ stateGames s }
           return $ (s', Just g'')
@@ -241,9 +262,6 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
       Just game -> do
         io $ writeChan (gameEventsReady game) ()
         ok "OK"
-
-  sendEvents events =
-    ok $ JSONMessage $ showJSON events
 
   gameLink :: State -> Game -> HotLink
   gameLink s g = hotlink (gameUrl s g) $ toHtml $ show g
@@ -363,4 +381,17 @@ safeFilePath pp =
        in if isRelative fp
           then Just fp
           else Nothing
+
+netstringI :: (Monad m) => Iter L m L
+netstringI = do
+  numS <- whileI (/= (fromIntegral $ ord ':'))
+  let num = read $ L.unpack numS -- XX: catch error
+  _ <- char ':'
+  buf <- takeExactI num
+  let len = fromIntegral $ L.length buf
+  when (len /= num) $
+    expectedI ("data of length " ++ show len ++ ", followed by EOF")
+              ("data of length " ++ show num)
+  _ <- char ','
+  return buf
 

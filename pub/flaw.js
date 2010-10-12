@@ -18,7 +18,9 @@ function startGame(cfg) { return function () {
     gameHome.appendChild(div({},
         actionButton("dealCard", "Deal Card", eventsUrl()
                     , postEvent
-                    , compose(showJSON, compose(listof, dealCardEvent)))));
+                    , compose(netstring,
+                        compose(showJSON,
+                          compose(listof, dealCardEvent))))));
 
     var gameEvents = div({});
     gameHome.appendChild(gameEvents);
@@ -199,4 +201,8 @@ function compose(fOuter, fInner) { return function (x) {
 }; }
 
 function listof(x) { return [x]; }
+
+function netstring(s) {
+    return "" + s.length + ":" + s + ",";
+}
 
