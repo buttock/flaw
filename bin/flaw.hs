@@ -52,11 +52,6 @@ data Event = Event { eventTime :: UTCTime
                    , eventData :: EventData
                    }
 
-{-
-instance Show Event where
-  show event = show $ eventData event
--}
-
 instance JSON Event where
   showJSON e = showJSON $ eventData e
   readJSON s = do dat <- readJSON s

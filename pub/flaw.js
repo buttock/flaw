@@ -1,13 +1,17 @@
 
+function nop() {}
+var log = typeof(console == 'undefined') ? nop : console.log;
+var warn = typeof(console == 'undefined') ? nop : console.warn;
+
 function onloadHandler () {}
 
 function configGame(cfg) {
-    console.log("configGame");
+    log("configGame");
     onloadHandler = startGame(cfg);
 }
 
 function startGame(cfg) { return function () {
-    console.log("startGame");
+    log("startGame");
 
     /*
      * User Interface
@@ -48,7 +52,7 @@ function startGame(cfg) { return function () {
     }
 
     function listenEvents() {
-        console.log("listenEvents");
+        log("listenEvents");
         var nEvents = events.length;
         http({ method: "GET"
              , url: nextEventsUrl(nEvents)
@@ -57,13 +61,13 @@ function startGame(cfg) { return function () {
                             listenEvents();
                         }
              , failure: function (status) {
-                            console.warn("Couldn't retrieve game events (status " + status + ").");
+                            warn("Couldn't retrieve game events (status " + status + ").");
                         }
              });
     }
 
     function postEvent(e) {
-        console.log("postEvent");
+        log("postEvent");
     }
 
     listenEvents();
