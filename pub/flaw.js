@@ -15,8 +15,10 @@ function startGame(cfg) { return function () {
 
     var gameHome = eltById(cfg.gameHomeId);
 
-    postForm = actionButton("post", "Post Event", eventsUrl(), postEvent);
-    gameHome.appendChild(div({}, postForm));
+    gameHome.appendChild(div({},
+        actionButton("dealCard", "Deal Card", eventsUrl()
+                    , postEvent
+                    , compose(showJSON, compose(listof, dealCardEvent)))));
 
     var gameEvents = div({});
     gameHome.appendChild(gameEvents);
@@ -65,6 +67,11 @@ function startGame(cfg) { return function () {
     listenEvents();
 }; }
 
+/*
+ * Event
+ */
+
+function dealCardEvent() { return "DEAL CARD"; }
 
 /*
  * Ajax
@@ -83,8 +90,13 @@ function http(o) { later (function() {
             xhr.onreadystatechange = function () {}
         }
     };
+
     xhr.open(o.method, o.url);
-    xhr.send();
+    if (o.data && o.contentType) {
+        xhr.setRequestHeader("Content-Type", o.contentType);
+    }
+
+    xhr.send(o.data);
 }); }
 
 function makeXHR() {
@@ -93,11 +105,10 @@ function makeXHR() {
 
 function later(k) { window.setTimeout(k, 0); }
 
-function readJSON (s) {
-    return eval('(' + s + ')');
-}
+function readJSON(s) { return JSON.parse(s); }
+function showJSON(v) { return JSON.stringify(v); }
 
-function actionButton(id, name, url, handler) {
+function actionButton(id, name, url, handler, dataMaker) {
     var submitButton = input({ type: "submit"
                              , id: id
                              , name: "post"
@@ -111,6 +122,8 @@ function actionButton(id, name, url, handler) {
 
         http({ method: "POST"
              , url: url
+             , contentType: "application/json; charset=UTF-8"
+             , data: dataMaker ? dataMaker(postForm) : null
              , success: function (resultText) {
                             handler(resultText);
                             enable(submitButton);
@@ -180,4 +193,10 @@ function each(a,f) {
         f(a[i]);
     }
 }
+
+function compose(fOuter, fInner) { return function (x) {
+    return fOuter(fInner(x));
+}; }
+
+function listof(x) { return [x]; }
 

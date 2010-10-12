@@ -313,6 +313,7 @@ gamePage g url isDealer =
                   ]
          , thetitle << (show g ++ if isDealer then " (Dealer)" else "")
          , jsLib $ pubPath "flaw.js"
+         , jsLib $ pubPath "json2-min.js"
          , js $ "configGame("
                 ++ (encodeJSValue $ makeObj
                       [("url", showJSON url)
