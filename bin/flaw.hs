@@ -325,10 +325,11 @@ gamePage g url isDealer =
                   , content "text/html; charset=UTF-8"
                   ]
          , thetitle << (show g ++ if isDealer then " (Dealer)" else "")
-         , jsLib $ pubPath "jsUtils.js"
-         , jsLib $ pubPath "domUtils.js"
-         , jsLib $ pubPath "flaw.js"
+         , jsLib $ pubPath "js.js"
+         , jsLib $ pubPath "dom.js"
+         , jsLib $ pubPath "ajax.js"
          , jsLib $ pubPath "json2-min.js"
+         , jsLib $ pubPath "flaw.js"
          , js $ "configGame("
                 ++ (encodeJSValue $ makeObj
                       [("url", showJSON url)

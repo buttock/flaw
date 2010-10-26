@@ -23,10 +23,6 @@ function listof() {
     return args;
 }
 
-function pair(x,y) { return [x,y]; }
-function fst(pr) { return pr[0]; }
-function snd(pr) { return pr[1]; }
-
 function each(a,f) {
     var i, iLim;
     for (iLim=a.length, i=0; i<iLim; i++) {
@@ -81,6 +77,10 @@ function foldl(f,k,a) {
     }
     return r;
 }
+
+function pair(x,y) { return [x,y]; }
+function fst(pr) { return pr[0]; }
+function snd(pr) { return pr[1]; }
 
 function sum(a) { return foldl(add,0,a); }
 

@@ -84,42 +84,10 @@ function eventsDataMaker(eventMakers) {
     };
 }
 
-var eventDataMaker = compose(eventsDataMaker, listof);
-
-/*
- * Ajax
- */
-
-function http(o) { later (function() {
-    var xhr = makeXHR();
-    xhr.onreadystatechange = function () {
-        if (this.readyState == 4) {
-            if (this.status == 200) {
-                o.success(this.responseText);
-            }
-            else {
-                o.failure(this.status);
-            }
-            xhr.onreadystatechange = function () {}
-        }
-    };
-
-    xhr.open(o.method, o.url);
-    if (o.data && o.contentType) {
-        xhr.setRequestHeader("Content-Type", o.contentType);
-    }
-
-    xhr.send(o.data);
-}); }
-
-function makeXHR() {
-    return new window.XMLHttpRequest();
-}
-
-function later(k) { window.setTimeout(k, 0); }
-
 function readJSON(s) { return JSON.parse(s); }
 function showJSON(v) { return JSON.stringify(v); }
+
+var eventDataMaker = compose(eventsDataMaker, listof);
 
 function actionButton(id, name, url, handler, dataMaker) {
     var submitButton = input({ type: "submit"
