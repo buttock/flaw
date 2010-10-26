@@ -8,12 +8,13 @@ all: $(TARGETS)
 WALL = -Wall
 INCLUDES = -i$(HOME)/iterIO/ -i$(HOME)/iterIO/Examples/web
 GHC = ghc $(WALL) $(INCLUDES)
+LIBS = -lz
 
 always:
 	@:
 
 bin/%: always
-	$(GHC) --make -i$(dir $@) $@.hs
+	$(GHC) --make -i$(dir $@) $@.hs $(LIBS)
 
 clean:
 	rm -f $(TARGETS)

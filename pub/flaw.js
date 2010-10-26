@@ -1,7 +1,7 @@
 
 function nop() {}
-var log = typeof(console == 'undefined') ? nop : console.log;
-var warn = typeof(console == 'undefined') ? nop : console.warn;
+var log = typeof(console) == 'undefined' ? nop : console.log;
+var warn = typeof(console) == 'undefined' ? nop : console.warn;
 
 function onloadHandler () {}
 
@@ -22,10 +22,9 @@ function startGame(cfg) { return function () {
     gameHome.appendChild(div({},
         actionButton("dealCard", "Deal Card", eventsUrl()
                     , postEvent
-                    , compose(netstring,
-                        compose(showJSON,
-                          compose(listof, dealCardEvent))))));
+                    , eventDataMaker(dealCardEvent))));
 
+    
     var gameEvents = div({});
     gameHome.appendChild(gameEvents);
 
@@ -78,6 +77,14 @@ function startGame(cfg) { return function () {
  */
 
 function dealCardEvent() { return "DEAL CARD"; }
+
+function eventsDataMaker(eventMakers) {
+    return function () {
+        return netstring(showJSON(map(eventMakers, apply)));
+    };
+}
+
+var eventDataMaker = compose(eventsDataMaker, listof);
 
 /*
  * Ajax
@@ -142,71 +149,5 @@ function actionButton(id, name, url, handler, dataMaker) {
     }
     postForm.addEventListener("submit", onSubmit, true);
     return postForm;
-}
-
-
-/*
- * DOM
- */
-
-function eltById(id) { return document.getElementById(id); }
-
-function disable(elt) { elt.setAttribute("disabled", "disabled"); }
-
-function enable(elt) { elt.removeAttribute("disabled"); }
-
-function text(s) { return document.createTextNode(s); }
-
-function element(name, attrs) {
-    var elt = document.createElement(name);
-    for (attrName in attrs) {
-        elt.setAttribute(attrName, attrs[attrName]);
-    }
-    return elt;
-}
-
-function eltMaker(name) { return function () {
-    var attrs = arguments[0];
-    var elt = element(name, attrs);
-    var i, iLim;
-    for (i=1, iLim=arguments.length; i<iLim; i++) {
-        elt.appendChild(arguments[i]);
-    }
-    return elt;
-}; }
-
-var div = eltMaker("div");
-var form = eltMaker("form");
-var input = eltMaker("input");
-
-function prepend(container, elt) {
-    var children = container.childNodes;
-    if (children.length > 0) {
-        container.insertBefore(elt, children[0]);
-    }
-    else {
-        container.appendChild(elt);
-    }
-}
-
-/*
- * util
- */
-
-function each(a,f) {
-    var i, iLim;
-    for (iLim=a.length, i=0; i<iLim; i++) {
-        f(a[i]);
-    }
-}
-
-function compose(fOuter, fInner) { return function (x) {
-    return fOuter(fInner(x));
-}; }
-
-function listof(x) { return [x]; }
-
-function netstring(s) {
-    return "" + s.length + ":" + s + ",";
 }
 
