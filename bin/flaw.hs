@@ -110,6 +110,8 @@ initState = State { stateGames = Map.empty
 
 type ReqM = ReaderT State IO
 
+type RouteFn m = HttpReq -> Iter ByteString m (HttpResp  m)
+
 --
 -- Request handler
 --
@@ -117,10 +119,11 @@ type ReqM = ReaderT State IO
 systemRoute :: HttpRoute ReqM
 systemRoute = 
   routeMap [("games", gamesRoute)
-           ,("dealer", dealerRoute)
-           ,("pub", pubRoute)
+           -- ,("dealer", dealerRoute)
+           -- ,("pub", pubRoute)
            ]
 
+gamesRoute :: HttpRoute ReqM
 gamesRoute =
   mconcat [ routeTop $ mconcat [ routeMethod "GET" $ routeFn showGames
                                -- , routeMethod "POST" $ routeFn startGame
@@ -128,7 +131,7 @@ gamesRoute =
           , routeVar $ gameRoute
           ]
 
-showGames :: 
+showGames :: RouteFn ReqM
 showGames = do
   ok $ page "Games" $ thediv <<
     [ h2 << "Games"
