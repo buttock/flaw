@@ -26,7 +26,6 @@ import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
 
 import Server
-import Message
 
 type L = L.ByteString
 type S = S.ByteString
@@ -39,7 +38,7 @@ main = do
   time <- getCurrentTime
   let state = initState { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
   stateM <- newMVar state
-  server 8000 (handleRequest stateM)
+  server 8000 systemRoute (flip runReaderT stateM)
 
 --
 -- Game state
@@ -106,8 +105,71 @@ initState = State { stateGames = Map.empty
                   }
 
 --
+-- Request-processing environment
+--
+
+type ReqM = ReaderT State IO
+
+--
 -- Request handler
 --
+
+systemRoute :: HttpRoute ReqM
+systemRoute = 
+  routeMap [("games", gamesRoute)
+           ,("dealer", dealerRoute)
+           ,("pub", pubRoute)
+           ]
+
+gamesRoute =
+  mconcat [ routeTop $ mconcat [ routeMethod "GET" $ routeFn showGames
+                               -- , routeMethod "POST" $ routeFn startGame
+                               ]
+          , routeVar $ gameRoute
+          ]
+
+showGames :: 
+showGames = do
+  ok $ page "Games" $ thediv <<
+    [ h2 << "Games"
+    , ulist << map ((li <<) . gameLink s) (Map.elems $ stateGames s)
+    , thediv << form ! [ action "/games", method "POST" ] <<
+        [ submit "start" "Start Game" ]
+    ]
+
+gameLink :: Game -> ReqM HotLink
+gameLink g = hotlink (gameUrl g) $ toHtml $ show g
+
+gameUrl :: Game -> ReqM URL
+gameUrl g = getState >>= \s ->
+  let (GameId i) = gameId g
+      i' :: Integer = fromIntegral $ AES.encrypt (stateKey s) $ fromIntegral i
+  return "/games/" ++ Base32.encode i'
+
+ 
+{-
+gameRoute g path isDealer =
+    case path of
+      [] -> showGame g isDealer
+      (x:restPath) ->
+        case S.unpack x of
+          "events" -> 
+            case S.unpack $ reqMethod req of
+              "GET" -> getEvents g restPath
+              "POST" -> postEvents g
+              _ -> badRequest "Inappropriate method"
+          _ -> notFound'
+
+
+      (is:restPath) -> do
+        s <- getState
+        let ii' :: Integer = fromMaybe 0 $ Base32.decode $ S.unpack is
+            i' :: Word128 = fromIntegral ii'
+            i :: Integer = fromIntegral $ AES.decrypt (stateKey s) i'
+        let gi = GameId i
+        case Map.lookup gi (stateGames s) of
+          Nothing -> notFound "No such game"
+          Just game -> gameRequest game restPath False
 
 handleRequest :: MVar State -> IO.Handle -> IO ()
 handleRequest stateM h = enumHandle' h |$ handleRequestI stateM h
@@ -300,6 +362,7 @@ handleRequestI' stateM h req = topRequest (reqPathLst req)
 
 io :: (MonadIO m) => IO a -> m a
 io x = liftIO x
+-}
 
 
 --
