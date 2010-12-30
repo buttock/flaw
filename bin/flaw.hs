@@ -36,9 +36,36 @@ encodeJSValue = encode
 main :: IO ()
 main = do
   time <- getCurrentTime
-  let state = initState { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
-  stateM <- newMVar state
-  server 8000 systemRoute (flip runReaderT stateM)
+  stateM <- newMVar $ initState { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
+  let route = routeReqM stateM systemRoute
+  server 8000 route
+
+---
+HttpRoute  
+  runHttpRoute :: !(HttpReq -> Maybe (Iter ByteString m (HttpResp m)))
+---
+
+routeReqM :: MVar State -> HttpRoute ReqM -> HttpRoute IO
+routeReqM stateM route =
+  HttpRoute $
+    fmap (adaptReqMI stateM (adaptResp $ runReqM stateM)) .
+      runHttpRoute route
+
+runReqM :: MVar State -> ReqM a -> IO a
+runReqM stateM m = modifyMVar stateM $ fmap swap . runStateT m
+{-
+  modifyMVar stateM $ \state -> do
+    (x, state') <- runStateT m state
+    return (state', x)
+-}
+
+runReqMI :: State -> (a -> b) -> Iter t ReqM a -> Iter t IO b
+runReqMI s adaptResult iter = adaptIter adaptResult adaptComputation iter
+ where
+  adaptComputation m = do
+    iter' <- lift (runReqM m s)
+    runStateTI iter' s'
+
 
 --
 -- Game state
@@ -108,7 +135,7 @@ initState = State { stateGames = Map.empty
 -- Request-processing environment
 --
 
-type ReqM = ReaderT State IO
+type ReqM = StateT State IO
 
 type RouteFn m = HttpReq -> Iter ByteString m (HttpResp  m)
 
