@@ -6,6 +6,7 @@ import qualified Codec.Encryption.AES as AES
 import qualified Codec.Crockford as Base32
 import           Control.Concurrent
 import           Control.Monad (when)
+import           Control.Monad.State
 import           Control.Monad.Trans
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
@@ -18,6 +19,7 @@ import           Data.LargeWord (Word128)
 import           Data.List (find)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Monoid
 import           Data.Time.Clock
 import           Data.Maybe (isJust, fromMaybe)
 import           System.FilePath.Posix (joinPath, combine, normalise, isRelative)
@@ -36,22 +38,11 @@ encodeJSValue = encode
 main :: IO ()
 main = do
   time <- getCurrentTime
-  stateM <- newMVar $ initState { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
-  let route = routeReqM stateM systemRoute
-  server 8000 route
+  stateM <- newMVar $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
+  -- let route = routeReqM stateM systemRoute
+  server 8000 systemRoute (runReqM stateM)
 
----
-HttpRoute  
-  runHttpRoute :: !(HttpReq -> Maybe (Iter ByteString m (HttpResp m)))
----
-
-routeReqM :: MVar State -> HttpRoute ReqM -> HttpRoute IO
-routeReqM stateM route =
-  HttpRoute $
-    fmap (adaptReqMI stateM (adaptResp $ runReqM stateM)) .
-      runHttpRoute route
-
-runReqM :: MVar State -> ReqM a -> IO a
+runReqM :: MVar St -> ReqM a -> IO a
 runReqM stateM m = modifyMVar stateM $ fmap swap . runStateT m
 {-
   modifyMVar stateM $ \state -> do
@@ -59,13 +50,25 @@ runReqM stateM m = modifyMVar stateM $ fmap swap . runStateT m
     return (state', x)
 -}
 
-runReqMI :: State -> (a -> b) -> Iter t ReqM a -> Iter t IO b
-runReqMI s adaptResult iter = adaptIter adaptResult adaptComputation iter
+swap :: (a,b) -> (b,a)
+swap (x,y) = (y,x)
+
+{-
+routeReqM :: MVar St -> HttpRoute ReqM -> HttpRoute IO
+routeReqM stateM route =
+  HttpRoute $
+    fmap (runReqMI stateM (runResp $ runReqM stateM)) .
+      runHttpRoute route
+
+runResp :: HttpResp ReqM -> HttpResp IO
+
+adaptReqMI :: St -> (a -> b) -> Iter t ReqM a -> Iter t IO b
+adaptReqMI stateM adaptResult iter = adaptIter adaptResult adaptComputation iter
  where
   adaptComputation m = do
-    iter' <- lift (runReqM m s)
-    runStateTI iter' s'
-
+    x <- runReqM stateM m
+    runReqMI 
+-}
 
 --
 -- Game state
@@ -120,24 +123,24 @@ gameEventsFrom n' g = more (gameNEvents g) (gameEvents g) []
 -- System state
 --
 
-data State = State { stateGames :: Map GameId Game
-                   , stateNextGameId :: Integer
-                   , stateKey :: Word128
-                   }
+data St = St { stateGames :: Map GameId Game
+             , stateNextGameId :: Integer
+             , stateKey :: Word128
+             }
 
-initState :: State
-initState = State { stateGames = Map.empty
-                  , stateNextGameId = 0
-                  , stateKey = 42
-                  }
+initSt :: St
+initSt = St { stateGames = Map.empty
+            , stateNextGameId = 0
+            , stateKey = 42
+            }
 
 --
 -- Request-processing environment
 --
 
-type ReqM = StateT State IO
+type ReqM = StateT St IO
 
-type RouteFn m = HttpReq -> Iter ByteString m (HttpResp  m)
+type RouteFn m = HttpReq -> Iter L m (HttpResp  m)
 
 --
 -- Request handler
@@ -155,7 +158,7 @@ gamesRoute =
   mconcat [ routeTop $ mconcat [ routeMethod "GET" $ routeFn showGames
                                -- , routeMethod "POST" $ routeFn startGame
                                ]
-          , routeVar $ gameRoute
+          -- , routeVar $ gameRoute
           ]
 
 showGames :: RouteFn ReqM
@@ -171,12 +174,16 @@ gameLink :: Game -> ReqM HotLink
 gameLink g = hotlink (gameUrl g) $ toHtml $ show g
 
 gameUrl :: Game -> ReqM URL
-gameUrl g = getState >>= \s ->
+gameUrl g = getSt >>= \s -> do
   let (GameId i) = gameId g
       i' :: Integer = fromIntegral $ AES.encrypt (stateKey s) $ fromIntegral i
-  return "/games/" ++ Base32.encode i'
+  return $ "/games/" ++ Base32.encode i'
 
+---
+--- Utils
+---
  
+ok :: Html -> R
 {-
 gameRoute g path isDealer =
     case path of
