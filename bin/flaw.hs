@@ -5,6 +5,7 @@ module Main (main) where
 import qualified Codec.Encryption.AES as AES
 import qualified Codec.Crockford as Base32
 import           Control.Concurrent
+import           Control.Exception (finally)
 import           Control.Monad (when)
 import           Control.Monad.State
 import           Control.Monad.Trans
@@ -24,10 +25,11 @@ import           Data.Time.Clock
 import           Data.Maybe (isJust, fromMaybe)
 import           System.FilePath.Posix (joinPath, combine, normalise, isRelative)
 import qualified System.IO as IO
+import           System.IO.Unsafe (unsafePerformIO)
 import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
 
-import Server
+import HttpServer
 
 type L = L.ByteString
 type S = S.ByteString
@@ -39,12 +41,8 @@ main :: IO ()
 main = do
   time <- getCurrentTime
   stateM <- newMVar $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
-  server 8000 systemRoute (runReqM stateM)
-
-runReqM :: MVar St -> ReqM a -> IO a
-runReqM stateM m = modifyMVar stateM $ \state -> do
-    (x, state') <- runStateT m state
-    return (state', x)
+  server <- mkHttpServer 8000 Nothing
+  inOtherThread $ runHttpServer server systemRoute
 
 --
 -- Game state
@@ -114,7 +112,13 @@ initSt = St { stateGames = Map.empty
 -- Request-processing environment
 --
 
-type ReqM = StateT St IO
+theStV :: MVar St
+theStV = unsafePerformIO $ newEmptyMVar
+
+getTheSt :: IO St
+getTheSt = readMVar theStV
+
+type ReqM = IO
 
 type ReqI a = Iter L ReqM a
 type ReqIResp = ReqI (HttpResp ReqM)
@@ -122,7 +126,7 @@ type ReqIResp = ReqI (HttpResp ReqM)
 type RouteFn = HttpReq -> ReqIResp
 
 getSt :: ReqI St
-getSt = lift $ get
+getSt = lift $ getTheSt
 
 --
 -- Request handler
@@ -249,3 +253,8 @@ netstringI = do
   _ <- char ','
   return buf
 
+inOtherThread :: IO () -> IO ()
+inOtherThread io = do
+  sem <- newQSem 0
+  _ <- forkIO $ io `finally` signalQSem sem
+  waitQSem sem

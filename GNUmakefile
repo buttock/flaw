@@ -14,7 +14,7 @@ always:
 	@:
 
 bin/%: always
-	$(GHC) --make -i$(dir $@) $@.hs $(LIBS)
+	$(GHC) --make -threaded -i$(dir $@) $@.hs $(LIBS)
 
 clean:
 	rm -f $(TARGETS)
