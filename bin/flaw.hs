@@ -144,13 +144,18 @@ io = liftIO
 systemRoute :: HttpRoute ReqM
 systemRoute = 
   routeMap [("games", gamesRoute)
-           ,("dealer", routeVar $ routeFn dealerFn)
+           ,("dealer", routeVar dealerRoute)
            ,("pub", pubRoute)
-           ,("foo", routeFn foo)
            ]
 
-foo :: RouteFn
-foo req = ok $ toHtml "foo"
+pubRoute = routeMethod "GET" $ routeFn $ \req ->
+      case safeFilePath ("pub" : map S.unpack (reqPathLst req)) of
+        Nothing -> badRequest "Bad file path"
+        Just filePath -> okJSFile filePath
+
+okJSFile path = ok path
+
+okJSON json = ok $ U.fromString $ encodeJSValue json
 
 gamesRoute :: HttpRoute ReqM
 gamesRoute =
@@ -186,18 +191,87 @@ startGame req = do
     in return (state', (state', game))
   seeOther (gameDealerUrl s game) $ page "Game created" $ toHtml $ gameDealerLink s game
 
-
-dealerFn :: RouteFn
-dealerFn req = do
+dealerRoute = routeReq $ \req ->
   let ident = S.unpack $ head $ reqPathParams req
+  in gameRoute ident True
+
+getGame :: String -> Maybe Game
+getGame ident = do
   s <- getSt
   let ii' :: Integer = fromMaybe 0 $ Base32.decode $ ident
       i' :: Word128 = fromIntegral ii'
       i :: Integer = fromIntegral $ AES.decrypt (stateKey s + 1) i'
   let gi = GameId i
-  case Map.lookup gi (stateGames s) of
-    Nothing -> notFound "No such game"
-    Just game -> gameRequest game restPath True
+  return $ Map.lookup gi (stateGames s)
+
+gameRoute ident isDealer =
+  mconcat [ routeTop $ routeFn $ showGame ident isDealer
+          , routeMap [("events", mconcat [ routeMethod "GET" $ getEvents ident
+                                         , routeMethod "POST" $ routeTop $ routeFn $ postEvents ident
+                                         ])]
+          ]
+
+showGame :: String -> Bool -> RouteFn
+showGame ident isDealer req = do
+  gM <- getGame ident
+  case gM of
+    Nothing -> notFound "no such game"
+    Just g -> do
+      s <- getSt
+      let url = (if isDealer then gameDealerUrl else gameUrl) s g
+      ok $ gamePage g url isDealer
+
+getEvents :: String -> HttpRoute ReqM
+getEvents ident = routeVar $ routeTop $ routeFn $ getEventsFrom ident
+
+getEventsFrom :: String -> RouteFn
+getEventsFrom ident req = do
+  gM <- getGame ident
+  case gM of
+    Nothing -> notFound "no such game"
+    Just g ->
+      let n = S.unpack $ head $ reqPathParams req
+          events = gameEventsFrom n g
+      in if null events
+          then do
+            ready <- io $ dupChan (gameEventsReady g)
+            _ <- io $ readChan ready
+            getEventsFrom' g n  
+          else
+            okJSON $ showJSON events
+
+getEventsFrom' g n = do
+  gM <- getGame $ gameId g
+  case gM of
+    Nothing -> badRequest "Game no longer available"
+    Just g' -> getEventsFrom g' n
+
+postEvents :: String -> RouteFn
+postEvents ident req = do
+  gM <- getGame ident
+  case gM of
+    Nothing -> notFound "no such game"
+    Just g -> do
+      -- io $ threadDelay $ 2 * 1000 * 1000
+      eventsS <- netstringI
+      let events = either error id $ resultToEither $ decode $
+                     U.toString eventsS
+      let gi = gameId g
+      gameM <- modifySt $ \s ->
+        case Map.lookup gi (stateGames s) of
+          Nothing -> return (s, Nothing)
+          Just g' -> do
+            -- now <- getCurrentTime
+            let g'' = g' { gameEvents = events ++ gameEvents g'
+                         , gameNEvents = length events + gameNEvents g'
+                         }
+                s' = s { stateGames = Map.insert gi g'' $ stateGames s }
+            return $ (s', Just g'')
+      case gameM of
+        Nothing -> badRequest "Game no longer available"
+        Just game -> do
+          io $ writeChan (gameEventsReady game) ()
+          ok "OK"
 
 --
 -- Url
@@ -282,11 +356,15 @@ onload = strAttr "onload"
 -- Utils
 --
  
-ok :: Html -> ReqI (HttpResp ReqM)
-ok html = return $ mkHtmlResp stat200 (U.fromString $ renderHtml html)
+ok :: (HTML h) => h -> ReqI (HttpResp ReqM)
+ok h = return $ mkHtmlResp stat200 (U.fromString $ renderHtml $ toHtml h)
 
 seeOther :: URL -> msg -> ReqI (HttpResp ReqM)
 seeOther url _ = return $ resp303 url
+
+notFound msg = ok $ toHtml msg
+
+badRequest msg = ok $ toHtml msg
 
 safeFilePath :: [String] -> Maybe FilePath
 safeFilePath pp =
@@ -315,5 +393,4 @@ inOtherThread io = do
   sem <- newQSem 0
   _ <- forkIO $ io `finally` signalQSem sem
   waitQSem sem
-
 
