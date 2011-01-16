@@ -141,7 +141,7 @@ io = liftIO
 systemRoute :: HttpRoute ReqM
 systemRoute = 
   routeMap [("games", gamesRoute)
-           ,("dealer", routeVar dealerRoute)
+           ,("dealer", routeVar $ gameRoute' True)
            ,("pub", pubRoute)
            ]
 
@@ -156,7 +156,7 @@ gamesRoute =
   mconcat [ routeTop $ mconcat [ routeMethod "GET" $ routeFn showGames
                                , routeMethod "POST" $ routeFn startGame
                                ]
-          -- , routeVar $ gameRoute
+          , routeVar $ gameRoute' False
           ]
 
 showGames :: RouteFn
@@ -187,40 +187,41 @@ startGame _ = do
   link <- gameDealerLink game
   seeOther url $ page "Game created" $ toHtml link 
 
-dealerRoute :: HttpRoute ReqM
-dealerRoute = routeReq $ \req ->
-  let ident = S.unpack $ head $ reqPathParams req
-  in gameRoute ident True
-
-getGame :: String -> ReqI (Maybe Game)
-getGame ident = do
+getGame :: String -> Bool -> ReqI (Maybe Game)
+getGame ident isDealer = do
   s <- getSt
   let ii' :: Integer = fromMaybe 0 $ Base32.decode $ ident
       i' :: Word128 = fromIntegral ii'
-      i :: Integer = fromIntegral $ AES.decrypt (stateKey s + 1) i'
+      offset = if isDealer then 1 else 0
+      i :: Integer = fromIntegral $ AES.decrypt (stateKey s + offset) i'
   let gi = GameId i
   return $ Map.lookup gi (stateGames s)
+
+gameRoute' :: Bool -> HttpRoute ReqM
+gameRoute' isDealer = routeReq $ \req ->
+  let ident = S.unpack $ head $ reqPathParams req
+  in gameRoute ident isDealer
 
 gameRoute :: String -> Bool -> HttpRoute ReqM
 gameRoute ident isDealer =
   mconcat [ routeTop $ routeFn $ showGame ident isDealer
-          , routeMap [("events", mconcat [ routeMethod "GET" $ getEvents ident
-                                         , routeMethod "POST" $ routeTop $ routeFn $ postEvents ident
+          , routeMap [("events", mconcat [ routeMethod "GET" $ getEvents ident isDealer
+                                         , routeMethod "POST" $ routeTop $ routeFn $ postEvents ident isDealer
                                          ])]
           ]
 
 showGame :: String -> Bool -> RouteFn
 showGame ident isDealer _ = do
-  gM <- getGame ident
+  gM <- getGame ident isDealer
   case gM of
     Nothing -> notFound "no such game"
     Just g -> do
       url <- (if isDealer then gameDealerUrl else gameUrl) g
       ok $ gamePage g url isDealer
 
-getEvents :: String -> HttpRoute ReqM
-getEvents ident = routeVar $ routeTop $ routeFn $ \req -> do
-  gM <- getGame ident
+getEvents :: String -> Bool -> HttpRoute ReqM
+getEvents ident isDealer = routeVar $ routeTop $ routeFn $ \req -> do
+  gM <- getGame ident isDealer
   case gM of
     Nothing -> notFound "No such game"
     Just g -> let n = read $ S.unpack $ head $ reqPathParams req
@@ -243,9 +244,9 @@ waitEventsFrom g n = do
     Nothing -> badRequest "Game no longer available"
     Just g' -> getEventsFrom g' n
 
-postEvents :: String -> RouteFn
-postEvents ident _ = do
-  gM <- getGame ident
+postEvents :: String -> Bool -> RouteFn
+postEvents ident isDealer _ = do
+  gM <- getGame ident isDealer
   case gM of
     Nothing -> notFound "no such game"
     Just g -> do
