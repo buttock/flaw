@@ -38,8 +38,13 @@ function startGame(cfg) { return function () {
         var ee = readJSON(eventsText);
         each(ee, function (e) {
             events.push(e);
-            prepend(gameEvents, div({}, text(e)));
+            handleEvent(e);
         });
+    }
+
+    function handleEvent(e) {
+        // just print the event out on the screen
+        prepend(gameEvents, div({}, text(e)));
     }
 
     function nextEventsUrl(nEvents) {
