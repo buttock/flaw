@@ -29,6 +29,8 @@ import           System.IO.Unsafe (unsafePerformIO)
 import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
 
+import qualified OpenSSL as SSL
+import qualified Network.Socket as Net
 import HttpServer
 
 type L = L.ByteString
@@ -40,9 +42,10 @@ encodeJSValue = encode
 main :: IO ()
 main = do
   time <- getCurrentTime
-  stateM <- newMVar $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
-  server <- mkHttpServer 8000 Nothing
-  inOtherThread $ runHttpServer server systemRoute
+  putMVar theStV $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
+  Net.withSocketsDo $ SSL.withOpenSSL $ do
+    server <- mkHttpServer 8000 Nothing
+    inOtherThread $ runHttpServer server systemRoute
 
 --
 -- Game state
@@ -128,6 +131,12 @@ type RouteFn = HttpReq -> ReqIResp
 getSt :: ReqI St
 getSt = lift $ getTheSt
 
+modifySt :: (St -> IO (St, a)) -> ReqI a
+modifySt f = io $ modifyMVar theStV f
+
+io :: IO a -> ReqI a
+io = liftIO
+
 --
 -- Request handler
 --
@@ -135,14 +144,18 @@ getSt = lift $ getTheSt
 systemRoute :: HttpRoute ReqM
 systemRoute = 
   routeMap [("games", gamesRoute)
-           -- ,("dealer", dealerRoute)
-           -- ,("pub", pubRoute)
+           ,("dealer", routeVar $ routeFn dealerFn)
+           ,("pub", pubRoute)
+           ,("foo", routeFn foo)
            ]
+
+foo :: RouteFn
+foo req = ok $ toHtml "foo"
 
 gamesRoute :: HttpRoute ReqM
 gamesRoute =
   mconcat [ routeTop $ mconcat [ routeMethod "GET" $ routeFn showGames
-                               -- , routeMethod "POST" $ routeFn startGame
+                               , routeMethod "POST" $ routeFn startGame
                                ]
           -- , routeVar $ gameRoute
           ]
@@ -158,6 +171,38 @@ showGames req = do
         [ submit "start" "Start Game" ]
     ]
 
+startGame :: RouteFn
+startGame req = do
+  now <- io getCurrentTime
+  ch <- io $ newChan
+  (s, game) <- modifySt $ \state ->
+    let i = stateNextGameId state
+        gi = GameId i
+        game = defaultGame { gameId = gi, gameStart = now, gameEventsReady = ch }
+        games' = Map.insert gi game (stateGames state)
+        state' = state { stateNextGameId = succ i
+                       , stateGames = games'
+                       }
+    in return (state', (state', game))
+  seeOther (gameDealerUrl s game) $ page "Game created" $ toHtml $ gameDealerLink s game
+
+
+dealerFn :: RouteFn
+dealerFn req = do
+  let ident = S.unpack $ head $ reqPathParams req
+  s <- getSt
+  let ii' :: Integer = fromMaybe 0 $ Base32.decode $ ident
+      i' :: Word128 = fromIntegral ii'
+      i :: Integer = fromIntegral $ AES.decrypt (stateKey s + 1) i'
+  let gi = GameId i
+  case Map.lookup gi (stateGames s) of
+    Nothing -> notFound "No such game"
+    Just game -> gameRequest game restPath True
+
+--
+-- Url
+--
+
 gameLink :: Game -> ReqI HotLink
 gameLink g = do
   url <- gameUrl g
@@ -169,6 +214,15 @@ gameUrl g = do
   let (GameId i) = gameId g
       i' :: Integer = fromIntegral $ AES.encrypt (stateKey s) $ fromIntegral i
   return $ "/games/" ++ Base32.encode i'
+
+gameDealerLink :: St -> Game -> HotLink
+gameDealerLink s g = hotlink (gameDealerUrl s g) $ toHtml $ show g
+
+gameDealerUrl :: St -> Game -> URL
+gameDealerUrl s g = "/dealer/" ++ Base32.encode i'
+ where
+  (GameId i) = gameId g
+  i' :: Integer = fromIntegral $ AES.encrypt (stateKey s + 1) $ fromIntegral i
 
 --
 -- Html
@@ -231,6 +285,9 @@ onload = strAttr "onload"
 ok :: Html -> ReqI (HttpResp ReqM)
 ok html = return $ mkHtmlResp stat200 (U.fromString $ renderHtml html)
 
+seeOther :: URL -> msg -> ReqI (HttpResp ReqM)
+seeOther url _ = return $ resp303 url
+
 safeFilePath :: [String] -> Maybe FilePath
 safeFilePath pp =
   if isJust $ find ((== '.') . head) $ filter (not . null) pp
@@ -258,3 +315,5 @@ inOtherThread io = do
   sem <- newQSem 0
   _ <- forkIO $ io `finally` signalQSem sem
   waitQSem sem
+
+
