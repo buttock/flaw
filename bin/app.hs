@@ -73,6 +73,7 @@ data Game = Game { gameId :: GameId
                  , gameEvents :: [Event]
                  , gameNEvents :: Int
                  , gameEventsReady :: Chan ()
+                 , gameLibUrl :: Maybe String
                  }
 
 defaultGame :: Game
@@ -81,6 +82,7 @@ defaultGame = Game { gameId = error "uninitialized gameId"
                    , gameEvents = []
                    , gameNEvents = 0
                    , gameEventsReady = error "uninitialized gameEventsReady"
+                   , gameLibUrl = Nothing
                    }
 
 instance Show Game where
@@ -315,7 +317,7 @@ gamePage g url isDealer =
          , jsLib $ pubPath "dom.js"
          , jsLib $ pubPath "ajax.js"
          , jsLib $ pubPath "json2-min.js"
-         , jsLib $ pubPath "flaw.js"
+         , jsLib $ pubPath "app.js"
          , js $ "configGame("
                 ++ (encodeJSValue $ makeObj
                       [("url", showJSON url)

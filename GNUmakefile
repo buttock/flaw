@@ -25,16 +25,16 @@ clean:
 	find . \( -name '*~' -o -name '*.hi' -o -name '*.o' \) -print0 \
 		| xargs -0 rm -f --
 
-.PHONY: start-flaw
-start-flaw: bin/flaw
-	daemonize -v -c $(root) -a -e $(log)/err -o $(log)/out -p $(log)/pid -l $(log)/lock $(absbin)/flaw
+.PHONY: start-flw
+start-flaw: bin/app
+	daemonize -v -c $(root) -a -e $(log)/err -o $(log)/out -p $(log)/pid -l $(log)/lock $(absbin)/app
 
 .PHONY: stop-flaw
 stop-flaw:
 	kill `cat $(log)/pid`
 
 .PHONY: restart-flaw
-restart-flaw: bin/flaw
+restart-flaw: bin/app
 	-make stop-flaw
 	sleep 1
 	make start-flaw
