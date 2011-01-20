@@ -1,7 +1,14 @@
 
 function nop() {}
-var log = typeof(console) == 'undefined' ? nop : console.log;
-var warn = typeof(console) == 'undefined' ? nop : console.warn;
+function consoleLog() {
+    return console.log.apply(console, arguments);
+}
+function consoleWarn() {
+    return console.warn.apply(console, arguments);
+}
+
+var log = typeof(console) == 'undefined' ? nop : consoleLog;
+var warn = typeof(console) == 'undefined' ? nop : consoleWarn;
 
 function onloadHandler () {}
 
