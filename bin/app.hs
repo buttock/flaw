@@ -85,7 +85,7 @@ defaultGame = Game { gameId = error "uninitialized gameId"
                    , gameEvents = []
                    , gameNEvents = 0
                    , gameEventsReady = error "uninitialized gameEventsReady"
-                   , gameLibUrl = Nothing
+                   , gameLibUrl = Just $ gamePath "Flaw.js"
                    }
 
 instance Show Game where
@@ -170,20 +170,37 @@ showGames _ = do
   s <- getSt
   links <- mapM gameLink $ Map.elems (stateGames s)
   ok $ page "Games" $ thediv <<
-    [ h2 << "Games"
-    , ulist << map (li <<) links
+    [ h2 << "Running Games"
+    , if null links
+        then toHtml "No games have been started yet."
+        else ulist << map (li <<) links
+    , hr
+    , h2 << "New Game"
     , thediv << form ! [ action "/games", method "POST" ] <<
-        [ submit "start" "Start Game" ]
+        [ paragraph << [ radio "gameLibUrl" (gamePath "Flaw.js") ! [checked], toHtml " Flaw", br
+                       , radio "gameLibUrl" "other", toHtml " ", textfield "otherLibUrl" ! [size "30"]
+                       ]
+        , paragraph << submit "start" "Start"
+        ]
     ]
 
 startGame :: RouteFn
-startGame _ = do
+startGame req = do
   now <- io getCurrentTime
   ch <- io $ newChan
+  controls <- getControls req
+  let libUrl = findDict "gameLibUrl" controls
+  let libUrl' = if libUrl == Just "other"
+                  then findDict "otherLibUrl" controls
+                  else libUrl
   game <- modifySt $ \state ->
     let i = stateNextGameId state
         gi = GameId i
-        game = defaultGame { gameId = gi, gameStart = now, gameEventsReady = ch }
+        game = defaultGame { gameId = gi
+                           , gameStart = now
+                           , gameEventsReady = ch
+                           , gameLibUrl = libUrl'
+                           }
         games' = Map.insert gi game (stateGames state)
         state' = state { stateNextGameId = succ i
                        , stateGames = games'
@@ -192,6 +209,9 @@ startGame _ = do
   url <- gameDealerUrl game
   link <- gameDealerLink game
   seeOther url $ page "Game created" $ toHtml link 
+
+findDict :: String -> [(String, String)] -> Maybe String
+findDict key = fmap snd . find ((== key) . fst) 
 
 getGame :: String -> Bool -> ReqI (Maybe Game)
 getGame ident isDealer = do
@@ -323,7 +343,7 @@ gamePage g url isDealer =
          , jsLib $ pubPath "json2-min.js"
          , jsLib $ pubPath "App.js"
          , jsLib $ pubPath "AppUtils.js"
-         , jsLib $ gamePath "Flaw.js"
+         , maybe noHtml jsLib $ gameLibUrl g
          , js $ "App.setCfg("
                 ++ (encodeJSValue $ makeObj
                       [("url", showJSON url)
@@ -417,4 +437,11 @@ inOtherThread m = do
   sem <- newQSem 0
   _ <- forkIO $ m `finally` signalQSem sem
   waitQSem sem
+
+getControls :: (Monad m) => HttpReq -> Iter L m [(String, String)]
+getControls req =
+  let docontrol acc field = do
+        val <- pureI
+        return $ (S.unpack $ ffName field, L.unpack val) : acc
+  in foldForm req docontrol []
 
