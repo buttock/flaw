@@ -17,6 +17,10 @@ LIBS = -lz
 always:
 	@:
 
+setup:
+	-mkdir $(root)
+	-mkdir $(log)
+
 bin/%: always
 	$(GHC) --make -threaded -i$(dir $@) $@.hs $(LIBS)
 

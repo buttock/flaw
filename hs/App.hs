@@ -2,7 +2,10 @@ module App ( Cfg(..)
            , defaultCfg
            ) where
 
-data Cfg = Cfg { cfgPort :: Int }
+import qualified Network.Socket as Net
 
-defaultCfg = Cfg { cfgPort = 8800 }
+data Cfg = Cfg { cfgPort :: Net.PortNumber }
+
+defaultCfg :: Cfg
+defaultCfg = Cfg { cfgPort = 8000 }
 

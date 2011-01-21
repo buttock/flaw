@@ -28,7 +28,10 @@ import           Text.XHtml.Strict hiding (p)
 
 import qualified OpenSSL as SSL
 import qualified Network.Socket as Net
+
 import HttpServer
+import App
+import App.Cfg (cfg)
 
 type L = L.ByteString
 -- type S = S.ByteString
@@ -41,7 +44,7 @@ main = do
   time <- getCurrentTime
   putMVar theStV $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
   Net.withSocketsDo $ SSL.withOpenSSL $ do
-    server <- mkHttpServer 8000 Nothing
+    server <- mkHttpServer (cfgPort cfg) Nothing
     inOtherThread $ runHttpServer server systemRoute
 
 --
@@ -144,12 +147,13 @@ systemRoute :: HttpRoute ReqM
 systemRoute = 
   routeMap [("games", gamesRoute)
            ,("dealer", routeVar $ gameRoute' True)
-           ,("pub", pubRoute)
+           ,("pub", jsFileRoute "pub")
+           ,("game", jsFileRoute "game")
            ]
 
-pubRoute :: HttpRoute ReqM
-pubRoute = routeMethod "GET" $ routeFn $ \req ->
-      case safeFilePath ("pub" : map S.unpack (reqPathLst req)) of
+jsFileRoute :: FilePath -> HttpRoute ReqM
+jsFileRoute path = routeMethod "GET" $ routeFn $ \req ->
+      case safeFilePath path $ map S.unpack (reqPathLst req) of
         Nothing -> badRequest "Bad file path"
         Just filePath -> okJSFile filePath
 
@@ -319,6 +323,7 @@ gamePage g url isDealer =
          , jsLib $ pubPath "json2-min.js"
          , jsLib $ pubPath "App.js"
          , jsLib $ pubPath "AppUtils.js"
+         , jsLib $ gamePath "Flaw.js"
          , js $ "App.setCfg("
                 ++ (encodeJSValue $ makeObj
                       [("url", showJSON url)
@@ -349,6 +354,9 @@ js code = tag "script" (primHtml code) ! [thetype "text/javascript"]
 
 pubPath :: FilePath -> FilePath
 pubPath = combine "/pub/"
+
+gamePath :: FilePath -> FilePath
+gamePath = combine "/game/"
 
 onload :: String -> HtmlAttr
 onload = strAttr "onload"
@@ -382,11 +390,11 @@ okJSON :: (JSON a) => a -> ReqI (HttpResp ReqM)
 okJSON x = return $ mkContentLenResp stat200 "text/json" contents
   where contents = U.fromString $ encodeJSValue $ showJSON $ x
 
-safeFilePath :: [String] -> Maybe FilePath
-safeFilePath pp =
+safeFilePath :: FilePath -> [String] -> Maybe FilePath
+safeFilePath basePath pp =
   if isJust $ find ((== '.') . head) $ filter (not . null) pp
   then Nothing
-  else let fp = normalise $ joinPath pp
+  else let fp = normalise $ combine basePath (joinPath pp)
        in if isRelative fp
           then Just fp
           else Nothing

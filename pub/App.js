@@ -45,22 +45,6 @@ var App = (function () {
              });
     }
 
-    /* Given a list of eventMakers (nullary functions that return strings),
-     * make a function that produces an eventsData (a message representing
-     * a list of events).
-     */
-    pub.eventsDataMaker = function (eventMakers) {
-        return function () {
-            return netstring(JSON.stringify(map(eventMakers, apply)));
-        };
-    }
-
-    /* Given an eventMaker (a nullary function that returns a string),
-     * make a function that produces an eventsData (a message representing
-     * a list of events).
-     */
-    pub.eventDataMaker = compose(pub.eventsDataMaker, listof);
-
     pub.send = function (eventsData, success, failure) {
         return http({ method: "POST"
                     , url: eventsUrl()
