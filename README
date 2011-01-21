@@ -1,2 +1,10 @@
 
+# some Haskell libraries you'll need
+
 cabal install  crockford Crypto xhtml json
+
+# the server uses David Mazieres' iteratee library:
+# http://www.scs.stanford.edu/~dm/iterIO/
+
+git clone http://www.scs.stanford.edu/~dm/repos/iterIO.git
+
