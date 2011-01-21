@@ -21,7 +21,7 @@ type L = L.ByteString
 data HttpServer = HttpServer {
       hsListenSock :: !Net.Socket
     , hsSslCtx :: !(Maybe SSL.SSLContext)
-    , hsLog :: !(Maybe Handle)
+    -- , hsLog :: !(Maybe Handle)
     }
 
 myListen :: Net.PortNumber -> IO Net.Socket
@@ -60,7 +60,10 @@ mkHttpServer port mctx = do
   h <- openBinaryFile "http.log" WriteMode
   hSetBuffering h NoBuffering
   -}
-  return $ HttpServer sock mctx Nothing
+  return $ HttpServer { hsListenSock = sock
+                      , hsSslCtx = mctx
+                      -- , hsLog = Nothing
+                      }
 
 runHttpServer :: HttpServer -> HttpRoute IO -> IO ()
 runHttpServer srv route = loop

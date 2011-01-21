@@ -317,16 +317,17 @@ gamePage g url isDealer =
          , jsLib $ pubPath "dom.js"
          , jsLib $ pubPath "ajax.js"
          , jsLib $ pubPath "json2-min.js"
-         , jsLib $ pubPath "app.js"
-         , js $ "configGame("
+         , jsLib $ pubPath "App.js"
+         , jsLib $ pubPath "AppUtils.js"
+         , js $ "App.setCfg("
                 ++ (encodeJSValue $ makeObj
                       [("url", showJSON url)
                       ,("gameHomeId", showJSON "game")
                       ,("isDealer", showJSON isDealer)
                       ])
-                ++ ");"
+                ++ ");\n"
          ]
-     , body ! [ onload "onloadHandler();" ] <<
+     , body ! [ onload "App.onload();" ] <<
          [ h1 << show g
          , thediv ! [ identifier "game" ] << "Hello."
          ]
