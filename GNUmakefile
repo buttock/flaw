@@ -18,8 +18,9 @@ always:
 	@:
 
 setup:
-	-mkdir $(root)
 	-mkdir $(log)
+	-mkdir $(root)
+	-(cd $(root) && ln -s ../pub && ln -s ../game)
 
 bin/%: always
 	$(GHC) --make -threaded -i$(dir $@) $@.hs $(LIBS)
