@@ -85,7 +85,7 @@ defaultGame = Game { gameId = error "uninitialized gameId"
                    , gameEvents = []
                    , gameNEvents = 0
                    , gameEventsReady = error "uninitialized gameEventsReady"
-                   , gameLibUrl = Just $ gamePath "Flaw.js"
+                   , gameLibUrl = error "uninitialized gameLibUrl"
                    }
 
 instance Show Game where
@@ -177,7 +177,8 @@ showGames _ = do
     , hr
     , h2 << "New Game"
     , thediv << form ! [ action "/games", method "POST" ] <<
-        [ paragraph << [ radio "gameLibUrl" (gamePath "Flaw.js") ! [checked], toHtml " Flaw", br
+        [ paragraph << [ radio "gameLibUrl" (gamePath "Flaw.js"), toHtml " Flaw", br
+                       , radio "gameLibUrl" (gamePath "Chat.js") ! [checked], toHtml " Chat", br
                        , radio "gameLibUrl" "other", toHtml " ", textfield "otherLibUrl" ! [size "30"]
                        ]
         , paragraph << submit "start" "Start"

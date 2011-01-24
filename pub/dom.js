@@ -27,6 +27,7 @@ function eltMaker(name) { return function () {
 var div = eltMaker("div");
 var form = eltMaker("form");
 var input = eltMaker("input");
+var paragraph = eltMaker("p");
 
 function prepend(container, elt) {
     var children = container.childNodes;
