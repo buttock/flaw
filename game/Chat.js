@@ -14,8 +14,7 @@ var Chat = (function () {
         var submitButton = input({ type: "submit" , name: "post" , value: "Post" });
         var textField = input({ type: "text", name: "note", size: "30" });
         var postForm = form({ method: "POST" }
-                           , paragraph({}, textField)
-                           , paragraph({}, submitButton));
+                           , paragraph({}, textField, text(" "), submitButton));
 
         function makeEventsData() {
             return AppUtils.mkEventsData(msgEvent(textField.value));
