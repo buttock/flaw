@@ -2,6 +2,17 @@ var AppUtils = (function () {
 
     var pub = {};
 
+    /* Given an eventString (a string representing an event)
+     * or an array of eventStrings, return an eventsData
+     * (a message representing a list of events).
+     */
+    pub.mkEventsData = function(x) {
+        var eventStrings = typeof(x) === "string"
+                           ? [x]
+                           : x;
+        return netstring(JSON.stringify(eventStrings));
+    }
+
     /* Given a list of eventMakers (nullary functions that return strings),
      * make a function that produces an eventsData (a message representing
      * a list of events).

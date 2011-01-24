@@ -5,9 +5,17 @@ function consoleLog() {
 function consoleWarn() {
     return console.warn.apply(console, arguments);
 }
+function consoleError() {
+    return console.error.apply(console, arguments);
+}
 
 var log = typeof(console) == 'undefined' ? nop : consoleLog;
 var warn = typeof(console) == 'undefined' ? nop : consoleWarn;
+var error = typeof(console) == 'undefined' ? alert : consoleError;
+
+function assert(val) {
+    if (!val) { error("assertion failed"); }
+}
 
 function apply() {
     var f = arguments[0];

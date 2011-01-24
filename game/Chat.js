@@ -6,7 +6,7 @@ var Chat = (function () {
 
     var msgCount = 0;
 
-    function chatEvent(msg) { return msg; }
+    function msgEvent(msg) { return msg; }
 
     pub.start = function () {
         var home = App.getHome();
@@ -17,9 +17,8 @@ var Chat = (function () {
                            , paragraph({}, textField)
                            , paragraph({}, submitButton));
 
-        function makePost() {
-            return AppUtils.eventDataMaker(function () {
-                return chatEvent(textField.value); })();
+        function makeEventsData() {
+            return AppUtils.mkEventsData(msgEvent(textField.value));
         }
 
         function onSubmit(e) {
@@ -28,7 +27,7 @@ var Chat = (function () {
             e.preventDefault();
             e.stopPropagation();
 
-            App.send(makePost()
+            App.send(makeEventsData()
                     ,function (resultText) {
                         textField.value = "";
                         enable(submitButton);
