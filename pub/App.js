@@ -22,9 +22,15 @@ var App = (function () {
 
     var events = [];
 
+    function Event (usecs, data) {
+        this.date = new Date(usecs * 1000);
+        this.data = data;
+    }
+
     function processEvents(eventsText, nEvents) {
         var ee = JSON.parse(eventsText);
-        each(ee, function (e) {
+        each(ee, function (ejs) {
+            var e = new Event (ejs[0], ejs[1]);
             events.push(e);
             eventHandler(e);
         });

@@ -23,8 +23,8 @@ var Flaw = (function () {
 
     pub.eventHandler = function (e) {
         // just print the event out on the screen
-        log("RCVD: " + e);
-        prepend(gameEvents, div({}, text(nDealt + ": " + e)));
+        log("RCVD: " + e.data);
+        prepend(gameEvents, div({}, text(nDealt + ": " + e.data)));
         nDealt++;
     };
 

@@ -20,6 +20,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Monoid
 import           Data.Time.Clock
+import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Data.Maybe (isJust, fromMaybe)
 import           Network.Socket (SockAddr(..))
 import           System.FilePath.Posix (joinPath, combine, normalise, isRelative)
@@ -70,11 +71,19 @@ data Event = Event { eventTime :: UTCTime
                    }
 
 instance JSON Event where
-  showJSON e = showJSON $ eventData e
+  showJSON e = JSArray [ showJSON $ eventTime e
+                       , showJSON $ eventData e
+                       ]
   readJSON s = do dat <- readJSON s
                   return $ Event { eventTime = error "no time"
                                  , eventData = dat
                                  }
+
+instance JSON UTCTime where
+  showJSON u = showJSON $ timeSeconds u
+
+timeSeconds :: UTCTime -> Integer
+timeSeconds = round . utcTimeToPOSIXSeconds
 
 data EventData = NoteEvent String 
 
@@ -323,9 +332,10 @@ postEvents ident isDealer _ = do
         case Map.lookup gi (stateGames s) of
           Nothing -> return (s, Nothing)
           Just g' -> do
-            -- now <- getCurrentTime
-            let g'' = g' { gameEvents = events ++ gameEvents g'
-                         , gameNEvents = length events + gameNEvents g'
+            now <- getCurrentTime
+            let events' = map (\e -> e { eventTime = now }) events
+                g'' = g' { gameEvents = events' ++ gameEvents g'
+                         , gameNEvents = length events' + gameNEvents g'
                          }
                 s' = s { stateGames = Map.insert gi g'' $ stateGames s }
             return $ (s', Just g'')
