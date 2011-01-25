@@ -46,7 +46,7 @@ var Chat = (function () {
 
     pub.eventHandler = function (e) {
         log("RCVD: " + e.data);
-        prepend(chatHistory, div({}, text(msgCount + " [" + e.date.toTimeString() + "] " + e.data)));
+        prepend(chatHistory, div({}, text(msgCount + " [" + e.date.toLocaleTimeString() + "] " + e.data)));
         msgCount++;
     };
 
