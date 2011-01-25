@@ -21,7 +21,6 @@ type L = L.ByteString
 data HttpServer = HttpServer {
       hsListenSock :: !Net.Socket
     , hsSslCtx :: !(Maybe SSL.SSLContext)
-    -- , hsLog :: !(Maybe Handle)
     }
 
 myListen :: Net.PortNumber -> IO Net.Socket
@@ -32,17 +31,11 @@ myListen pn = do
   Net.listen sock Net.maxListenQueue
   return sock
 
-httpAccept :: HttpServer -> IO (Iter L IO (), Onum L IO a)
+httpAccept :: HttpServer -> IO (Net.SockAddr, Iter L IO (), Onum L IO a)
 httpAccept hs = do
   (s, addr) <- Net.accept $ hsListenSock hs
-  hPutStrLn stderr (show addr)
-  maybe (mkInsecure s) (mkSecure s) (hsSslCtx hs)
-  {-
   (iter, enum) <- maybe (mkInsecure s) (mkSecure s) (hsSslCtx hs)
-  return $ maybe (iter, enum) |. inumhLog undefined)
-                 (\h -> (inumhLog h .| iter, enum |. inumhLog h))
-                 (hsLog hs)
-  -}
+  return (addr, iter, enum)
   where
     mkInsecure s = do
       h <- Net.socketToHandle s ReadWriteMode
@@ -56,20 +49,15 @@ httpAccept hs = do
 mkHttpServer :: Net.PortNumber -> Maybe SSL.SSLContext -> IO HttpServer
 mkHttpServer port mctx = do
   sock <- myListen port
-  {-
-  h <- openBinaryFile "http.log" WriteMode
-  hSetBuffering h NoBuffering
-  -}
   return $ HttpServer { hsListenSock = sock
                       , hsSslCtx = mctx
-                      -- , hsLog = Nothing
                       }
 
-runHttpServer :: HttpServer -> HttpRoute IO -> IO ()
+runHttpServer :: HttpServer -> (Net.SockAddr -> HttpRoute IO) -> IO ()
 runHttpServer srv route = loop
   where
     loop = do
-      (iter, enum) <- httpAccept srv
-      _ <- forkIO $ enum |$ inumHttpServer (ioHttpServer route) .| iter
+      (addr, iter, enum) <- httpAccept srv
+      _ <- forkIO $ enum |$ inumHttpServer (ioHttpServer $ route addr) .| iter
       loop
 

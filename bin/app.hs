@@ -21,7 +21,9 @@ import qualified Data.Map as Map
 import           Data.Monoid
 import           Data.Time.Clock
 import           Data.Maybe (isJust, fromMaybe)
+import           Network.Socket (SockAddr(..))
 import           System.FilePath.Posix (joinPath, combine, normalise, isRelative)
+import           System.IO
 import           System.IO.Unsafe (unsafePerformIO)
 import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
@@ -42,10 +44,19 @@ encodeJSValue = encode
 main :: IO ()
 main = do
   time <- getCurrentTime
-  putMVar theStV $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time }
+  logChan <- newChan
+  _ <- forkIO $ logger logChan stderr
+  putMVar theStV $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time
+                          , stateLog = Just $ logChan
+                          }
   Net.withSocketsDo $ SSL.withOpenSSL $ do
     server <- mkHttpServer (cfgPort cfg) Nothing
     inOtherThread $ runHttpServer server systemRoute
+
+logger :: Chan String -> Handle -> IO ()
+logger chan h = forever $ do
+  line <- readChan chan
+  hPutStrLn h line
 
 --
 -- Game state
@@ -105,12 +116,14 @@ gameEventsFrom n' g = more (gameNEvents g) (gameEvents g) []
 data St = St { stateGames :: Map GameId Game
              , stateNextGameId :: Integer
              , stateKey :: Word128
+             , stateLog :: Maybe (Chan String)
              }
 
 initSt :: St
 initSt = St { stateGames = Map.empty
             , stateNextGameId = 0
             , stateKey = 42
+            , stateLog = Nothing
             }
 
 --
@@ -139,12 +152,36 @@ modifySt f = io $ modifyMVar theStV f
 io :: IO a -> ReqI a
 io = liftIO
 
+warn :: String -> ReqI ()
+warn msg = do
+  chM <- stateLog <$> getSt
+  case chM of
+    Nothing -> return ()
+    Just ch -> io $ writeChan ch msg
+
 --
 -- Request handler
 --
 
-systemRoute :: HttpRoute ReqM
-systemRoute = 
+systemRoute :: SockAddr -> HttpRoute ReqM
+systemRoute addr = HttpRoute $ \req -> Just $ do
+  let respM = fromMaybe (notFound "Not Found") $ runHttpRoute topRoute req
+  resp <- respM
+  warn $ reqLine addr req resp
+  return resp
+
+reqLine :: (Monad m) => SockAddr -> HttpReq -> HttpResp m -> String
+reqLine addr req resp =
+  show addr
+  ++ " " ++ S.unpack (reqMethod req)
+  ++ " " ++ S.unpack (reqPath req)
+  ++ " -> " ++ showStatus (respStatus resp)
+
+showStatus :: HttpStatus -> String
+showStatus (HttpStatus code desc) = show code ++ " " ++ S.unpack desc
+ 
+topRoute :: HttpRoute ReqM
+topRoute = 
   routeMap [("games", gamesRoute)
            ,("dealer", routeVar $ gameRoute' True)
            ,("pub", jsFileRoute "pub")
