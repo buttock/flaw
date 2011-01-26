@@ -1,9 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module HttpServer (mkHttpServer, runHttpServer) where
+module HttpServer (mkHttpServer, runHttpServer, runHttpServer') where
 
 import Prelude hiding (catch, head, id, div)
+import Control.Monad
 import Control.Concurrent
 import Control.Exception
 import Control.Monad.Trans
@@ -53,11 +54,19 @@ mkHttpServer port mctx = do
                       , hsSslCtx = mctx
                       }
 
-runHttpServer :: HttpServer -> (Net.SockAddr -> HttpRoute IO) -> IO ()
-runHttpServer srv route = loop
-  where
-    loop = do
-      (addr, iter, enum) <- httpAccept srv
-      _ <- forkIO $ enum |$ inumHttpServer (ioHttpServer $ route addr) .| iter
-      loop
+runHttpServer' :: (MonadIO m)
+               => HttpServer
+               -> (Net.SockAddr -> HttpRoute m)
+               -> (m (Iter L m ()) -> IO (Iter L m ()))
+               -> IO ()
+runHttpServer' srv route run = forever $ do
+  (addr, iter, enum) <- httpAccept srv
+  let processConnection = inumHttpServer $ ioHttpServer $ route addr
+  _ <- forkIO $ enum |$ adaptIterM run (processConnection .| liftIterIO iter)
+  return ()
 
+runHttpServer :: HttpServer -> (Net.SockAddr -> HttpRoute IO) -> IO ()
+runHttpServer srv route = forever $ do
+  (addr, iter, enum) <- httpAccept srv
+  _ <- forkIO $ enum |$ inumHttpServer (ioHttpServer $ route addr) .| iter
+  return ()
