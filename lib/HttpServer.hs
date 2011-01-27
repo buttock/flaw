@@ -56,13 +56,13 @@ mkHttpServer port mctx = do
 
 runHttpServer' :: (MonadIO m)
                => HttpServer
-               -> (Net.SockAddr -> HttpRoute m)
-               -> (m (Iter L m ()) -> IO (Iter L m ()))
+               -> HttpRoute m
+               -> (Net.SockAddr -> m (Iter L m ()) -> IO (Iter L m ()))
                -> IO ()
-runHttpServer' srv route run = forever $ do
+runHttpServer' srv route runConn = forever $ do
   (addr, iter, enum) <- httpAccept srv
-  let processConnection = inumHttpServer $ ioHttpServer $ route addr
-  _ <- forkIO $ enum |$ adaptIterM run (processConnection .| liftIterIO iter)
+  let processConnection = inumHttpServer $ ioHttpServer $ route
+  _ <- forkIO $ enum |$ adaptIterM (runConn addr) (processConnection .| liftIterIO iter)
   return ()
 
 runHttpServer :: HttpServer -> (Net.SockAddr -> HttpRoute IO) -> IO ()

@@ -49,12 +49,12 @@ main = do
   _ <- forkIO $ logger logChan stderr
   stateVar <- newMVar $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time
                                , stateLog = Just $ logChan }
-  let conn = Conn { connAddr = error "no connAddr"
-                  , connStateVar = stateVar
-                  }
+  let runConn addr = runReqM $ Conn { connAddr = addr
+                                    , connStateVar = stateVar
+                                    }
   Net.withSocketsDo $ SSL.withOpenSSL $ do
     server <- mkHttpServer (cfgPort cfg) Nothing
-    inOtherThread $ runHttpServer' server systemRoute (runReqM conn)
+    inOtherThread $ runHttpServer' server systemRoute runConn
 
 logger :: Chan String -> Handle -> IO ()
 logger chan h = forever $ do
@@ -168,6 +168,9 @@ type RouteFn = HttpReq -> ReqIResp
 getSt :: ReqI St
 getSt = lift $ getTheSt
 
+getPeerAddr :: ReqI SockAddr
+getPeerAddr = lift $ asks connAddr
+
 io :: IO a -> ReqI a
 io = liftIO
 
@@ -182,10 +185,10 @@ warn msg = do
 -- Request handler
 --
 
-systemRoute :: SockAddr -> HttpRoute ReqM
-systemRoute addr = HttpRoute $ \req -> Just $ do
-  let respM = fromMaybe (notFound "Not Found") $ runHttpRoute topRoute req
-  resp <- respM
+systemRoute :: HttpRoute ReqM
+systemRoute = HttpRoute $ \req -> Just $ do
+  resp <- fromMaybe (notFound "Not Found") $ runHttpRoute topRoute req
+  addr <- getPeerAddr
   warn $ reqLine addr req resp
   return resp
 
