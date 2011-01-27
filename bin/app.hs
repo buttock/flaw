@@ -7,6 +7,7 @@ import qualified Codec.Crockford as Base32
 import           Control.Concurrent
 import           Control.Exception (finally)
 import           Control.Monad.State
+import           Control.Monad.Reader
 import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Lazy.UTF8 as U
@@ -25,7 +26,6 @@ import           Data.Maybe (isJust, fromMaybe)
 import           Network.Socket (SockAddr(..))
 import           System.FilePath.Posix (joinPath, combine, normalise, isRelative)
 import           System.IO
-import           System.IO.Unsafe (unsafePerformIO)
 import           Text.JSON
 import           Text.XHtml.Strict hiding (p)
 
@@ -47,12 +47,14 @@ main = do
   time <- getCurrentTime
   logChan <- newChan
   _ <- forkIO $ logger logChan stderr
-  putMVar theStV $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time
-                          , stateLog = Just $ logChan
-                          }
+  stateVar <- newMVar $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time
+                               , stateLog = Just $ logChan }
+  let conn = Conn { connAddr = error "no connAddr"
+                  , connStateVar = stateVar
+                  }
   Net.withSocketsDo $ SSL.withOpenSSL $ do
     server <- mkHttpServer (cfgPort cfg) Nothing
-    inOtherThread $ runHttpServer server systemRoute
+    inOtherThread $ runHttpServer' server systemRoute (runReqM conn)
 
 logger :: Chan String -> Handle -> IO ()
 logger chan h = forever $ do
@@ -81,6 +83,7 @@ instance JSON Event where
 
 instance JSON UTCTime where
   showJSON u = showJSON $ timeSeconds u
+  readJSON = error "readJSON UTCTime: unimplemented"
 
 timeSeconds :: UTCTime -> Integer
 timeSeconds = round . utcTimeToPOSIXSeconds
@@ -139,24 +142,31 @@ initSt = St { stateGames = Map.empty
 -- Request-processing environment
 --
 
-theStV :: MVar St
-theStV = unsafePerformIO $ newEmptyMVar
+data Conn = Conn { connAddr :: SockAddr
+                 , connStateVar :: MVar St
+                 }
 
-getTheSt :: IO St
-getTheSt = readMVar theStV
+type ReqM = ReaderT Conn IO
 
-type ReqM = IO
+runReqM :: Conn -> ReqM a -> IO a
+runReqM conn m = runReaderT m conn
+
+getTheSt :: ReqM St
+getTheSt = do
+  stateVar <- asks connStateVar
+  liftIO $ readMVar stateVar
+
+modifySt :: (St -> IO (St, a)) -> ReqI a
+modifySt f = do
+  stateVar <- asks connStateVar
+  io $ modifyMVar stateVar f
 
 type ReqI a = Iter L ReqM a
 type ReqIResp = ReqI (HttpResp ReqM)
-
 type RouteFn = HttpReq -> ReqIResp
 
 getSt :: ReqI St
 getSt = lift $ getTheSt
-
-modifySt :: (St -> IO (St, a)) -> ReqI a
-modifySt f = io $ modifyMVar theStV f
 
 io :: IO a -> ReqI a
 io = liftIO
