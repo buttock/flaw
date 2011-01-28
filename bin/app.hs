@@ -49,12 +49,13 @@ main = do
   _ <- forkIO $ logger logChan stderr
   stateVar <- newMVar $ initSt { stateKey = fromIntegral $ fromEnum $ utctDayTime time
                                , stateLog = Just $ logChan }
-  let runConn addr = runReqM $ Conn { connAddr = addr
-                                    , connStateVar = stateVar
-                                    }
+  let runConn addr = runReqM $ ReqInfo { riAddr = addr
+                                       , riReq = error "no riReq"
+                                       , riStateVar = stateVar
+                                       }
   Net.withSocketsDo $ SSL.withOpenSSL $ do
     server <- mkHttpServer (cfgPort cfg) Nothing
-    inOtherThread $ runHttpServer' server systemRoute runConn
+    inOtherThread $ runHttpServer server handleRequest runConn
 
 logger :: Chan String -> Handle -> IO ()
 logger chan h = forever $ do
@@ -142,66 +143,63 @@ initSt = St { stateGames = Map.empty
 -- Request-processing environment
 --
 
-data Conn = Conn { connAddr :: SockAddr
-                 , connStateVar :: MVar St
-                 }
+data ReqInfo = ReqInfo { riAddr :: SockAddr
+                       , riReq :: HttpReq
+                       , riStateVar :: MVar St
+                       }
 
-type ReqM = ReaderT Conn IO
+type ReqM = ReaderT ReqInfo IO
 
-runReqM :: Conn -> ReqM a -> IO a
-runReqM conn m = runReaderT m conn
+runReqM :: ReqInfo -> ReqM a -> IO a
+runReqM ri m = runReaderT m ri
 
-getTheSt :: ReqM St
-getTheSt = do
-  stateVar <- asks connStateVar
+getSt :: ReqM St
+getSt = do
+  stateVar <- asks riStateVar
   liftIO $ readMVar stateVar
 
-modifySt :: (St -> IO (St, a)) -> ReqI a
+{-
+getReq :: ReqM HttpReq
+getReq = asks riReq
+-}
+
+getPeerAddr :: ReqM SockAddr
+getPeerAddr = asks riAddr
+
+modifySt :: (St -> IO (St, a)) -> ReqM a
 modifySt f = do
-  stateVar <- asks connStateVar
-  io $ modifyMVar stateVar f
+  stateVar <- asks riStateVar
+  liftIO $ modifyMVar stateVar f
+
+warn :: String -> ReqM ()
+warn msg = do
+  chM <- stateLog <$> getSt
+  case chM of
+    Nothing -> return ()
+    Just ch -> liftIO $ writeChan ch msg
+
+--
+-- Request-processing Iteratee
+--
 
 type ReqI a = Iter L ReqM a
 type ReqIResp = ReqI (HttpResp ReqM)
 type RouteFn = HttpReq -> ReqIResp
 
-getSt :: ReqI St
-getSt = lift $ getTheSt
-
-getPeerAddr :: ReqI SockAddr
-getPeerAddr = lift $ asks connAddr
-
-io :: IO a -> ReqI a
-io = liftIO
-
-warn :: String -> ReqI ()
-warn msg = do
-  chM <- stateLog <$> getSt
-  case chM of
-    Nothing -> return ()
-    Just ch -> io $ writeChan ch msg
+getStI :: ReqI St
+getStI = lift $ getSt
 
 --
 -- Request handler
 --
 
-systemRoute :: HttpRoute ReqM
-systemRoute = HttpRoute $ \req -> Just $ do
+handleRequest :: HttpReq -> ReqI (HttpResp ReqM)
+handleRequest req = do
+  addr <- lift getPeerAddr
   resp <- fromMaybe (notFound "Not Found") $ runHttpRoute topRoute req
-  addr <- getPeerAddr
-  warn $ reqLine addr req resp
+  lift $ warn $ showReqLine addr req resp
   return resp
 
-reqLine :: (Monad m) => SockAddr -> HttpReq -> HttpResp m -> String
-reqLine addr req resp =
-  show addr
-  ++ " " ++ S.unpack (reqMethod req)
-  ++ " " ++ S.unpack (reqPath req)
-  ++ " -> " ++ showStatus (respStatus resp)
-
-showStatus :: HttpStatus -> String
-showStatus (HttpStatus code desc) = show code ++ " " ++ S.unpack desc
- 
 topRoute :: HttpRoute ReqM
 topRoute = 
   routeMap [("games", gamesRoute)
@@ -226,7 +224,7 @@ gamesRoute =
 
 showGames :: RouteFn
 showGames _ = do
-  s <- getSt
+  s <- getStI
   links <- mapM gameLink $ Map.elems (stateGames s)
   ok $ page "Games" $ thediv <<
     [ h2 << "Running Games"
@@ -246,14 +244,14 @@ showGames _ = do
 
 startGame :: RouteFn
 startGame req = do
-  now <- io getCurrentTime
-  ch <- io $ newChan
+  now <- liftIO getCurrentTime
+  ch <- liftIO $ newChan
   controls <- getControls req
   let libUrl = findDict "gameLibUrl" controls
   let libUrl' = if libUrl == Just "other"
                   then findDict "otherLibUrl" controls
                   else libUrl
-  game <- modifySt $ \state ->
+  game <- lift $ modifySt $ \state ->
     let i = stateNextGameId state
         gi = GameId i
         game = defaultGame { gameId = gi
@@ -275,7 +273,7 @@ findDict key = fmap snd . find ((== key) . fst)
 
 getGame :: String -> Bool -> ReqI (Maybe Game)
 getGame ident isDealer = do
-  s <- getSt
+  s <- getStI
   let ii' :: Integer = fromMaybe 0 $ Base32.decode $ ident
       i' :: Word128 = fromIntegral ii'
       offset = if isDealer then 1 else 0
@@ -323,9 +321,9 @@ getEventsFrom g n =
 
 waitEventsFrom :: Game -> Int -> ReqIResp
 waitEventsFrom g n = do
-  ready <- io $ dupChan (gameEventsReady g)
-  _ <- io $ readChan ready
-  s <- getSt
+  ready <- liftIO $ dupChan (gameEventsReady g)
+  _ <- liftIO $ readChan ready
+  s <- getStI
   case Map.lookup (gameId g) (stateGames s) of
     Nothing -> badRequest "Game no longer available"
     Just g' -> getEventsFrom g' n
@@ -336,12 +334,11 @@ postEvents ident isDealer _ = do
   case gM of
     Nothing -> notFound "no such game"
     Just g -> do
-      -- io $ threadDelay $ 2 * 1000 * 1000
       eventsS <- netstringI
       let events = either error id $ resultToEither $ decode $
                      U.toString eventsS
       let gi = gameId g
-      gameM <- modifySt $ \s ->
+      gameM <- lift $ modifySt $ \s ->
         case Map.lookup gi (stateGames s) of
           Nothing -> return (s, Nothing)
           Just g' -> do
@@ -355,7 +352,7 @@ postEvents ident isDealer _ = do
       case gameM of
         Nothing -> badRequest "Game no longer available"
         Just game -> do
-          io $ writeChan (gameEventsReady game) ()
+          liftIO $ writeChan (gameEventsReady game) ()
           ok "OK"
 
 --
@@ -374,14 +371,14 @@ gameDealerLink g = do
 
 gameUrl :: Game -> ReqI URL
 gameUrl g = do
-  s <- getSt
+  s <- getStI
   let (GameId i) = gameId g
       i' :: Integer = fromIntegral $ AES.encrypt (stateKey s) $ fromIntegral i
   return $ "/games/" ++ Base32.encode i'
 
 gameDealerUrl :: Game -> ReqI URL
 gameDealerUrl g = do
-  s <- getSt
+  s <- getStI
   let (GameId i) = gameId g
       i' :: Integer = fromIntegral $ AES.encrypt (stateKey s + 1) $ fromIntegral i
   return $ "/dealer/" ++ Base32.encode i'
@@ -448,6 +445,16 @@ onload = strAttr "onload"
 --
 -- Utils
 --
+
+showReqLine :: (Monad m) => SockAddr -> HttpReq -> HttpResp m -> String
+showReqLine addr req resp =
+  show addr
+  ++ " " ++ S.unpack (reqMethod req)
+  ++ " " ++ S.unpack (reqPath req)
+  ++ " -> " ++ showStatus (respStatus resp)
+
+showStatus :: HttpStatus -> String
+showStatus (HttpStatus code desc) = show code ++ " " ++ S.unpack desc
 
 htmlResp :: (HTML h) => HttpStatus -> h -> HttpResp ReqM
 htmlResp stat h = mkHtmlResp stat (U.fromString $ renderHtml $ toHtml h)
